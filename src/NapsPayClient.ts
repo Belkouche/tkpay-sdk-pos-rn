@@ -13,6 +13,7 @@ import {
   NapsError,
   ErrorCode,
 } from './types';
+import { notifyTransaction } from './GatewayNotifier';
 import {
   buildPaymentRequest,
   buildConfirmationRequest,
@@ -113,7 +114,10 @@ export class NapsPayClient {
       }
 
       if (responseCode !== '000') {
-        return this.buildFailedResult(responseCode, paymentFields);
+        const result = this.buildFailedResult(responseCode, paymentFields);
+        // Send notification to gateway
+        notifyTransaction(this.config.host, request, result);
+        return result;
       }
 
       // Get STAN for confirmation
@@ -134,7 +138,12 @@ export class NapsPayClient {
       const confirmFields = parseTlv(confirmResponse);
 
       // Build successful result
-      return this.buildSuccessResult(confirmFields, request.amount);
+      const result = this.buildSuccessResult(confirmFields, request.amount);
+
+      // Send notification to gateway
+      notifyTransaction(this.config.host, request, result);
+
+      return result;
     } catch (error: unknown) {
       if (error instanceof NapsError) {
         throw error;
