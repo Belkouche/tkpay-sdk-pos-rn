@@ -126,46 +126,46 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
 
     /**
      * Receive response from socket
+     * Uses the provided timeout for initial read (waiting for terminal response)
+     * Then uses short timeout for detecting end of message
      */
     private fun receiveResponse(timeout: Int): String {
         val response = StringBuilder()
         val buffer = CharArray(8192)
         val socket = activeSocket ?: throw IllegalStateException("No active socket")
 
-        // Save original timeout and set short timeout for end-of-message detection
-        val originalTimeout = socket.soTimeout
-        socket.soTimeout = 1000
+        // Use the full timeout for the first read (waiting for terminal to respond)
+        // This is critical - payment can take 30-120 seconds while customer taps card
+        socket.soTimeout = timeout
 
         try {
+            // First read - wait for terminal response with full timeout
+            val initialCount = reader?.read(buffer) ?: -1
+            if (initialCount == -1) {
+                throw IllegalStateException("Connection closed by terminal")
+            }
+            if (initialCount > 0) {
+                response.append(buffer, 0, initialCount)
+            }
+
+            // Now set short timeout to detect end of message
+            // (check if more data is available)
+            socket.soTimeout = 500
+
+            // Read any remaining data with short timeout
             while (true) {
                 try {
                     val count = reader?.read(buffer) ?: -1
-                    if (count == -1) break
-                    if (count == 0) break
-
+                    if (count <= 0) break
                     response.append(buffer, 0, count)
-
-                    // If less than buffer size, try once more with short timeout
-                    if (count < buffer.size) {
-                        try {
-                            val additionalCount = reader?.read(buffer) ?: 0
-                            if (additionalCount > 0) {
-                                response.append(buffer, 0, additionalCount)
-                            }
-                        } catch (e: Exception) {
-                            // Timeout means we have all data
-                            break
-                        }
-                        break
-                    }
-                } catch (e: Exception) {
-                    // Timeout means we have all data
-                    if (response.isNotEmpty()) break
-                    throw e
+                } catch (e: java.net.SocketTimeoutException) {
+                    // Timeout means we have all data - this is expected
+                    break
                 }
             }
         } finally {
-            socket.soTimeout = originalTimeout
+            // Restore original timeout for potential future reads
+            socket.soTimeout = timeout
         }
 
         if (response.isEmpty()) {

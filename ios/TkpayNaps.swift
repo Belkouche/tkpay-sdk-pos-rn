@@ -202,33 +202,50 @@ class TkpayNaps: NSObject {
         let bufferSize = 8192
         var buffer = [UInt8](repeating: 0, count: bufferSize)
 
-        // Wait for data with timeout
-        var attempts = 0
-        let maxAttempts = timeout / 100
+        // Wait for initial data with full timeout
+        // This is critical - payment can take 30-120 seconds while customer taps card
+        let timeoutSeconds = Double(timeout) / 1000.0
+        let startTime = Date()
 
-        while attempts < maxAttempts {
+        while Date().timeIntervalSince(startTime) < timeoutSeconds {
             if inputStream.hasBytesAvailable {
                 break
             }
+            if inputStream.streamStatus == .error {
+                throw inputStream.streamError ?? NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Stream error"])
+            }
+            if inputStream.streamStatus == .closed || inputStream.streamStatus == .atEnd {
+                throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Connection closed"])
+            }
+            // Check every 100ms
             Thread.sleep(forTimeInterval: 0.1)
-            attempts += 1
         }
 
         if !inputStream.hasBytesAvailable {
             throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Timeout waiting for response"])
         }
 
-        // Read available data
-        while inputStream.hasBytesAvailable {
-            let bytesRead = inputStream.read(&buffer, maxLength: bufferSize)
-            if bytesRead > 0 {
-                response.append(contentsOf: buffer[0..<bytesRead])
-            } else if bytesRead < 0 {
-                throw inputStream.streamError ?? NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Read failed"])
-            }
+        // Read initial data
+        let bytesRead = inputStream.read(&buffer, maxLength: bufferSize)
+        if bytesRead > 0 {
+            response.append(contentsOf: buffer[0..<bytesRead])
+        } else if bytesRead < 0 {
+            throw inputStream.streamError ?? NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Read failed"])
+        }
 
-            // Small delay to check for more data
-            Thread.sleep(forTimeInterval: 0.1)
+        // Read any remaining data with short timeout (500ms)
+        let endTime = Date().addingTimeInterval(0.5)
+        while Date() < endTime {
+            if inputStream.hasBytesAvailable {
+                let additionalBytesRead = inputStream.read(&buffer, maxLength: bufferSize)
+                if additionalBytesRead > 0 {
+                    response.append(contentsOf: buffer[0..<additionalBytesRead])
+                } else {
+                    break
+                }
+            } else {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
         }
 
         guard let responseString = String(data: response, encoding: .utf8), !responseString.isEmpty else {

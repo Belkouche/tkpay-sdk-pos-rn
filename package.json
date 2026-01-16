@@ -1,6 +1,6 @@
 {
   "name": "react-native-tkpay-naps",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "React Native SDK for NAPS Pay terminal integration",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
