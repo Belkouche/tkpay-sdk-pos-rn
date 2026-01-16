@@ -1,0 +1,55 @@
+{
+  "name": "react-native-tkpay-naps",
+  "version": "1.0.1",
+  "description": "React Native SDK for NAPS Pay terminal integration",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "react-native": "src/index",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "*.podspec"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf lib"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "naps",
+    "payment",
+    "pos",
+    "tkpay",
+    "terminal"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Belkouche/tkpay-sdk-pos-rn.git"
+  },
+  "author": "TKPAY <support@tkpay.ma>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Belkouche/tkpay-sdk-pos-rn/issues"
+  },
+  "homepage": "https://github.com/Belkouche/tkpay-sdk-pos-rn#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "engines": {
+    "node": ">= 18.0.0"
+  }
+}
