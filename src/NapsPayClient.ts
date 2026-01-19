@@ -20,6 +20,7 @@ import {
   parseTlv,
   parseReceipt,
   maskCardNumber,
+  enhanceMerchantReceipt,
 } from './TlvProtocol';
 
 // Declare React Native types for build time
@@ -242,24 +243,33 @@ export class NapsPayClient {
   ): PaymentResult {
     // Parse receipts
     const dpValue = fields[TLV_TAGS.DP];
-    const merchantReceipt = dpValue
+    let merchantReceipt = dpValue
       ? parseReceipt(dpValue, ReceiptType.MERCHANT)
       : undefined;
-    const customerReceipt = dpValue
+    let customerReceipt = dpValue
       ? parseReceipt(dpValue, ReceiptType.CUSTOMER)
       : undefined;
+
+    const stan = fields[TLV_TAGS.STAN] || '';
+    const ncai = fields[TLV_TAGS.NCAI] || '';
+    const sequence = fields[TLV_TAGS.NS] || '';
+
+    // Enhance merchant receipt with STAN, NCAI, and Sequence Number
+    if (merchantReceipt && stan) {
+      merchantReceipt = enhanceMerchantReceipt(merchantReceipt, stan, ncai, sequence);
+    }
 
     return {
       success: true,
       responseCode: fields[TLV_TAGS.CR] || '000',
-      stan: fields[TLV_TAGS.STAN],
+      stan,
       maskedCardNumber: fields[TLV_TAGS.NCAR],
       cardExpiry: fields[TLV_TAGS.DV],
       cardholderName: fields[TLV_TAGS.NC],
       entryMode: fields[TLV_TAGS.SH],
       authNumber: fields[TLV_TAGS.NA],
-      ncai: fields[TLV_TAGS.NCAI],
-      sequence: fields[TLV_TAGS.NS],
+      ncai,
+      sequence,
       transactionDate: fields[TLV_TAGS.DT],
       transactionTime: fields[TLV_TAGS.HT],
       merchantReceipt,

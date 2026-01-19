@@ -285,6 +285,55 @@ function applyBranding(lines: ReceiptLine[]): ReceiptLine[] {
 }
 
 /**
+ * Enhance merchant receipt with STAN, NCAI, and Sequence Number
+ */
+export function enhanceMerchantReceipt(
+  receipt: Receipt,
+  stan: string,
+  ncai: string,
+  sequence: string
+): Receipt {
+  const lines = [...receipt.lines];
+
+  // Find the line with "CODE AUTORISATION" or "APPROUVEE" to insert after
+  let insertIndex = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const text = lines[i].text.toUpperCase();
+    if (text.includes('CODE AUTORISATION') || text.includes('AUTH')) {
+      insertIndex = i + 1;
+      break;
+    }
+  }
+
+  // Create new lines for STAN, NCAI, SEQ
+  const newLines: ReceiptLine[] = [
+    {
+      lineNumber: '90',
+      text: `STAN: ${stan}`,
+      bold: false,
+      alignment: Alignment.LEFT,
+    },
+    {
+      lineNumber: '91',
+      text: `NCAI: ${ncai}`,
+      bold: false,
+      alignment: Alignment.LEFT,
+    },
+    {
+      lineNumber: '92',
+      text: `SEQ: ${sequence}`,
+      bold: false,
+      alignment: Alignment.LEFT,
+    },
+  ];
+
+  // Insert the new lines
+  lines.splice(insertIndex, 0, ...newLines);
+
+  return { type: receipt.type, lines };
+}
+
+/**
  * Format receipt as plain text
  */
 export function receiptToPlainText(receipt: Receipt, width: number = 40): string {
