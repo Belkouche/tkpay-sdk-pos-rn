@@ -157,21 +157,35 @@ export class NapsError extends Error {
  * TLV Tags
  */
 export const TLV_TAGS = {
-  TM: '001', // Message Type
-  MT: '002', // Amount (minor units)
-  NCAI: '003', // Register(2) + Cashier(5)
-  NS: '004', // Sequence Number
-  NCAR: '007', // Card Number (masked)
-  STAN: '008', // System Trace Audit Number
-  NA: '009', // Authorization Number
-  DP: '010', // Print Data (Receipt)
-  DE: '012', // Currency Code
-  CR: '013', // Response Code
-  DV: '014', // Card Expiry (YYMM)
-  SH: '015', // Entry Mode
-  DT: '016', // Transaction Date (DDMMYYYY)
-  HT: '017', // Transaction Time (HHMMSS)
-  NC: '018', // Cardholder Name
+  TM: '001',    // Message Type (3)
+  MT: '002',    // Amount in minor units (12)
+  NCAI: '003',  // Terminal Number: Register(2) + Cashier(5) (7)
+  NS: '004',    // Sequence Number (6)
+  NSA: '005',   // Cancellation Sequence Number (6)
+  NHC: '006',   // Hostess Number (2)
+  NCAR: '007',  // Card Number - masked (16)
+  STAN: '008',  // System Trace Audit Number (6)
+  NA: '009',    // Authorization Number (6)
+  DP: '010',    // Printable Data / Receipt (3500)
+  CB: '011',    // Barcode (100)
+  DE: '012',    // Currency Code (3)
+  CR: '013',    // Response Code (3)
+  DA: '014',    // Date (8)
+  HE: '015',    // Time (6)
+  NPRT: '016',  // Cardholder Name (48)
+  DAEX: '017',  // Card Expiration Date YYMM (4)
+  DATR: '018',  // Transaction Date DDMMYYYY (8)
+  HETR: '019',  // Transaction Time HHMMSS (6)
+  TIDE: '020',  // Ticket Type (2)
+  TYPA: '021',  // Transaction Type (1)
+  RE: '022',    // Receipt Data (256)
+  RECB: '023',  // Receipt Copy (25)
+  REQU: '024',  // Request Type (2)
+  RESE: '025',  // Response Message (25)
+  RECO: '026',  // Receipt Confirmation (25)
+  RERA: '027',  // Response Reason (2)
+  MDLC: '028',  // Model Code (3)
+  EM: '040',    // Entry Mode (3)
 } as const;
 
 /**

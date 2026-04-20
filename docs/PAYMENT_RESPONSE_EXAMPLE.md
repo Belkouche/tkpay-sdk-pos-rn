@@ -105,8 +105,46 @@ When a payment is declined or fails, the response includes error details:
   currency: "MAD",
 
   // Receipts still generated
-  merchantReceipt: "...",
-  customerReceipt: "..."
+  merchantReceipt: `
+================================
+           TKPAY
+      RECU COMMERCANT
+================================
+Terminal: 12345678
+Commercant: CAFE CENTRAL
+Date: 16/01/2026  14:45:12
+--------------------------------
+VENTE PUCE
+Carte: 524814******5678
+MASTERCARD
+--------------------------------
+Montant:          500.00 MAD
+--------------------------------
+STAN: 000143
+NCAI: 001002
+SEQ: 000043
+REFUSEE - FONDS INSUFFISANTS
+================================
+   CONSERVER CE RECU
+================================
+`,
+  customerReceipt: `
+================================
+           TKPAY
+       RECU CLIENT
+================================
+Date: 16/01/2026  14:45:12
+--------------------------------
+VENTE PUCE
+Carte: 524814******5678
+--------------------------------
+Montant:          500.00 MAD
+--------------------------------
+REFUSEE - FONDS INSUFFISANTS
+================================
+     MERCI DE VOTRE VISITE
+================================
+`
 }
 ```
 

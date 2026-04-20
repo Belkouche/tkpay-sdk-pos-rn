@@ -66,8 +66,8 @@ export function buildPaymentRequest(
     buildField(TLV_TAGS.NCAI, ncai) +
     buildField(TLV_TAGS.NS, sequence) +
     buildField(TLV_TAGS.DE, CURRENCY.MAD) +
-    buildField(TLV_TAGS.DT, getCurrentDate()) +
-    buildField(TLV_TAGS.HT, getCurrentTime())
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
   );
 }
 
@@ -84,8 +84,8 @@ export function buildConfirmationRequest(
     buildField(TLV_TAGS.STAN, stan) +
     buildField(TLV_TAGS.NCAI, ncai) +
     buildField(TLV_TAGS.NS, sequence) +
-    buildField(TLV_TAGS.DT, getCurrentDate()) +
-    buildField(TLV_TAGS.HT, getCurrentTime())
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
   );
 }
 
@@ -388,16 +388,44 @@ export function getTagName(tag: string): string {
       return 'Currency';
     case TLV_TAGS.CR:
       return 'Response Code';
-    case TLV_TAGS.DV:
-      return 'Card Expiry';
-    case TLV_TAGS.SH:
-      return 'Entry Mode';
-    case TLV_TAGS.DT:
+    case TLV_TAGS.DA:
       return 'Date';
-    case TLV_TAGS.HT:
+    case TLV_TAGS.HE:
       return 'Time';
-    case TLV_TAGS.NC:
+    case TLV_TAGS.NPRT:
       return 'Cardholder Name';
+    case TLV_TAGS.DAEX:
+      return 'Card Expiry';
+    case TLV_TAGS.DATR:
+      return 'Transaction Date';
+    case TLV_TAGS.HETR:
+      return 'Transaction Time';
+    case TLV_TAGS.NSA:
+      return 'Cancel Sequence';
+    case TLV_TAGS.NHC:
+      return 'Hostess Number';
+    case TLV_TAGS.CB:
+      return 'Barcode';
+    case TLV_TAGS.TIDE:
+      return 'Ticket Type';
+    case TLV_TAGS.TYPA:
+      return 'Transaction Type';
+    case TLV_TAGS.RE:
+      return 'Receipt Data';
+    case TLV_TAGS.RECB:
+      return 'Receipt Copy';
+    case TLV_TAGS.REQU:
+      return 'Request Type';
+    case TLV_TAGS.RESE:
+      return 'Response Message';
+    case TLV_TAGS.RECO:
+      return 'Receipt Confirmation';
+    case TLV_TAGS.RERA:
+      return 'Response Reason';
+    case TLV_TAGS.MDLC:
+      return 'Model Code';
+    case TLV_TAGS.EM:
+      return 'Entry Mode';
     default:
       return `Unknown Tag ${tag}`;
   }
