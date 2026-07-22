@@ -199,6 +199,92 @@ export const RECEIPT_TAGS = {
 } as const;
 
 /**
+ * Settlement Result
+ */
+export interface SettlementResult {
+  /** Whether settlement was successful */
+  success: boolean;
+  /** Response code (000 = success) */
+  responseCode: string;
+  /** Settlement date (DDMMYYYY) */
+  date?: string;
+  /** Settlement time (HHMMSS) */
+  time?: string;
+  /** Settlement receipt */
+  receipt?: Receipt;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Cancellation Result (TM=003)
+ */
+export interface CancellationResult {
+  /** Whether cancellation was accepted */
+  success: boolean;
+  /** Response code (000 = accepted) */
+  responseCode: string;
+  /** STAN of the cancelled transaction */
+  stan?: string;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Network Test Result (TM=009)
+ */
+export interface NetworkTestResult {
+  /** Whether terminal responded with RC=000 */
+  success: boolean;
+  /** Response code */
+  responseCode: string;
+  /** Round-trip time in milliseconds */
+  rttMs?: number;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Duplicate Receipt Result (TM=008)
+ */
+export interface DuplicateReceiptResult {
+  /** Whether duplicate was returned */
+  success: boolean;
+  /** Response code */
+  responseCode: string;
+  /** Merchant receipt */
+  merchantReceipt?: Receipt;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Reset PinPAD Result (TM=012)
+ */
+export interface ResetResult {
+  /** Whether reset was accepted */
+  success: boolean;
+  /** Response code */
+  responseCode: string;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Referencing Result (TM=013)
+ */
+export interface ReferencingResult {
+  /** Whether referencing succeeded */
+  success: boolean;
+  /** Response code */
+  responseCode: string;
+  /** Referencing/config receipt */
+  receipt?: Receipt;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
  * Message Types
  */
 export const MESSAGE_TYPES = {
@@ -206,6 +292,18 @@ export const MESSAGE_TYPES = {
   PAYMENT_RESPONSE: '101',
   CONFIRMATION_REQUEST: '002',
   CONFIRMATION_RESPONSE: '102',
+  CANCELLATION_REQUEST: '003',
+  CANCELLATION_RESPONSE: '103',
+  DUPLICATE_REQUEST: '008',
+  DUPLICATE_RESPONSE: '108',
+  NETWORK_TEST_REQUEST: '009',
+  NETWORK_TEST_RESPONSE: '109',
+  SETTLEMENT_REQUEST: '010',
+  SETTLEMENT_RESPONSE: '110',
+  RESET_REQUEST: '012',
+  RESET_RESPONSE: '112',
+  REFERENCING_REQUEST: '013',
+  REFERENCING_RESPONSE: '113',
 } as const;
 
 /**

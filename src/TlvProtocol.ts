@@ -90,6 +90,92 @@ export function buildConfirmationRequest(
 }
 
 /**
+ * Build settlement request TLV (TM=010)
+ */
+export function buildSettlementRequest(ncai: string): string {
+  return (
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.SETTLEMENT_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
+  );
+}
+
+/**
+ * Build cancellation request TLV (TM=003)
+ * @param stan   STAN of the transaction to cancel
+ * @param ncai   Register(2) + Cashier(5)
+ * @param sequence  Original sequence number
+ */
+export function buildCancellationRequest(
+  stan: string,
+  ncai: string,
+  sequence: string
+): string {
+  return (
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_REQUEST) +
+    buildField(TLV_TAGS.STAN, stan) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NSA, sequence) +
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
+  );
+}
+
+/**
+ * Build network test request TLV (TM=009)
+ */
+export function buildNetworkTestRequest(ncai: string): string {
+  return (
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.NETWORK_TEST_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
+  );
+}
+
+/**
+ * Build duplicate receipt request TLV (TM=008)
+ * @param stan  STAN of the transaction to reprint (optional — terminal uses last if absent)
+ */
+export function buildDuplicateRequest(ncai: string, stan?: string): string {
+  let tlv =
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.DUPLICATE_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai);
+  if (stan) {
+    tlv += buildField(TLV_TAGS.STAN, stan);
+  }
+  tlv +=
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime());
+  return tlv;
+}
+
+/**
+ * Build reset PinPAD request TLV (TM=012)
+ */
+export function buildResetRequest(ncai: string): string {
+  return (
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.RESET_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
+  );
+}
+
+/**
+ * Build referencing request TLV (TM=013)
+ */
+export function buildReferencingRequest(ncai: string): string {
+  return (
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.REFERENCING_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
+  );
+}
+
+/**
  * Mask card number to show only first 6 and last 4 digits
  * Example: 5167940123453315 -> 516794******3315
  */

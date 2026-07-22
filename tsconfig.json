@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "baseUrl": "./",
     "paths": {
-      "react-native-tkpay-naps": ["./src/index"]
+      "react-native-tkpay-naps": ["./src/index"],
+      "*": ["./*"]
     },
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
@@ -10,7 +10,7 @@
     "jsx": "react",
     "lib": ["ES2020", "DOM"],
     "module": "CommonJS",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "resolveJsonModule": true,

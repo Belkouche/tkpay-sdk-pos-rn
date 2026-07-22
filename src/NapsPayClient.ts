@@ -8,6 +8,12 @@ import {
   type NapsConfig,
   type PaymentRequest,
   type PaymentResult,
+  type SettlementResult,
+  type CancellationResult,
+  type NetworkTestResult,
+  type DuplicateReceiptResult,
+  type ResetResult,
+  type ReferencingResult,
   TLV_TAGS,
   ReceiptType,
   NapsError,
@@ -17,6 +23,12 @@ import { notifyTransaction } from './GatewayNotifier';
 import {
   buildPaymentRequest,
   buildConfirmationRequest,
+  buildSettlementRequest,
+  buildCancellationRequest,
+  buildNetworkTestRequest,
+  buildDuplicateRequest,
+  buildResetRequest,
+  buildReferencingRequest,
   parseTlv,
   parseReceipt,
   maskCardNumber,
@@ -188,17 +200,277 @@ export class NapsPayClient {
   }
 
   /**
-   * Test connection to terminal
+   * Force end-of-day settlement (telecollecte) — TM=010
+   *
+   * Sends batch totals to the NAPS server. The terminal must be idle
+   * ("Attente Caisse") and referencing must have run at least once.
+   *
+   * @param registerId Register ID (2 digits)
+   * @param cashierId Cashier ID (5 digits)
+   */
+  async settlement(registerId: string, cashierId: string): Promise<SettlementResult> {
+    const ncai = registerId + cashierId;
+    const settlementTlv = buildSettlementRequest(ncai);
+
+    try {
+      const response = await getNativeModule().sendPaymentRequest(
+        this.config.host,
+        this.config.port,
+        settlementTlv,
+        this.config.timeout
+      );
+
+      const fields = parseTlv(response);
+      const responseCode = fields[TLV_TAGS.CR] ?? '';
+
+      return {
+        success: responseCode === '000',
+        responseCode,
+        date: fields[TLV_TAGS.DA],
+        time: fields[TLV_TAGS.HE],
+        error: responseCode !== '000' ? `Settlement failed with code: ${responseCode}` : undefined,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, responseCode: '', error: message };
+    }
+  }
+
+  /**
+   * Test connection to terminal (TCP-level only)
    */
   async testConnection(): Promise<boolean> {
     try {
       return await getNativeModule().testConnection(
         this.config.host,
         this.config.port,
-        5000 // 5 second timeout for test
+        5000
       );
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Send a network test message to the terminal (TM=009)
+   *
+   * Unlike testConnection() which only opens a TCP socket,
+   * this sends the actual NAPS M2M network test message and
+   * verifies the terminal responds RC=000.
+   *
+   * @param registerId Register ID (2 digits)
+   * @param cashierId  Cashier ID (5 digits)
+   */
+  async networkTest(
+    registerId: string,
+    cashierId: string
+  ): Promise<NetworkTestResult> {
+    const ncai = registerId + cashierId;
+    const tlv = buildNetworkTestRequest(ncai);
+    const start = Date.now();
+
+    try {
+      const raw = await getNativeModule().sendPaymentRequest(
+        this.config.host,
+        this.config.port,
+        tlv,
+        10000 // short timeout — terminal should answer immediately
+      );
+
+      const fields = parseTlv(raw);
+      const responseCode = fields[TLV_TAGS.CR] ?? '';
+      const rttMs = Date.now() - start;
+
+      return {
+        success: responseCode === '000',
+        responseCode,
+        rttMs,
+        error: responseCode !== '000'
+          ? `Network test failed with code: ${responseCode}`
+          : undefined,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, responseCode: '', error: message };
+    }
+  }
+
+  /**
+   * Cancel (void) a previous transaction (TM=003)
+   *
+   * Can only cancel the last approved transaction while the terminal
+   * is still on the same session. Send the STAN returned by processPayment().
+   *
+   * @param stan       STAN of the transaction to cancel
+   * @param registerId Register ID (2 digits)
+   * @param cashierId  Cashier ID (5 digits)
+   * @param sequence   Sequence number of the original transaction
+   */
+  async cancelPayment(
+    stan: string,
+    registerId: string,
+    cashierId: string,
+    sequence: string
+  ): Promise<CancellationResult> {
+    const ncai = registerId + cashierId;
+    const tlv = buildCancellationRequest(stan, ncai, sequence);
+
+    try {
+      const raw = await getNativeModule().sendPaymentRequest(
+        this.config.host,
+        this.config.port,
+        tlv,
+        this.config.timeout
+      );
+
+      const fields = parseTlv(raw);
+      const responseCode = fields[TLV_TAGS.CR] ?? '';
+      const responseStan = fields[TLV_TAGS.STAN];
+
+      return {
+        success: responseCode === '000',
+        responseCode,
+        stan: responseStan,
+        error: responseCode !== '000'
+          ? `Cancellation failed with code: ${responseCode}`
+          : undefined,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, responseCode: '', error: message };
+    }
+  }
+
+  /**
+   * Request a duplicate receipt from the terminal (TM=008)
+   *
+   * Reprints the last transaction receipt. Pass stan to reprint a specific
+   * transaction; omit to reprint the last one.
+   *
+   * @param registerId Register ID (2 digits)
+   * @param cashierId  Cashier ID (5 digits)
+   * @param stan       Optional STAN of the transaction to reprint
+   */
+  async printDuplicate(
+    registerId: string,
+    cashierId: string,
+    stan?: string
+  ): Promise<DuplicateReceiptResult> {
+    const ncai = registerId + cashierId;
+    const tlv = buildDuplicateRequest(ncai, stan);
+
+    try {
+      const raw = await getNativeModule().sendPaymentRequest(
+        this.config.host,
+        this.config.port,
+        tlv,
+        this.config.timeout
+      );
+
+      const fields = parseTlv(raw);
+      const responseCode = fields[TLV_TAGS.CR] ?? '';
+      const dpValue = fields[TLV_TAGS.DP];
+      const merchantReceipt = dpValue
+        ? parseReceipt(dpValue, ReceiptType.MERCHANT)
+        : undefined;
+
+      return {
+        success: responseCode === '000',
+        responseCode,
+        merchantReceipt,
+        error: responseCode !== '000'
+          ? `Duplicate receipt failed with code: ${responseCode}`
+          : undefined,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, responseCode: '', error: message };
+    }
+  }
+
+  /**
+   * Reset the terminal PinPAD (TM=012)
+   *
+   * Sends the terminal back to idle ("Attente Caisse") state.
+   * Use if the terminal is stuck in card-waiting mode.
+   *
+   * @param registerId Register ID (2 digits)
+   * @param cashierId  Cashier ID (5 digits)
+   */
+  async resetPinPad(
+    registerId: string,
+    cashierId: string
+  ): Promise<ResetResult> {
+    const ncai = registerId + cashierId;
+    const tlv = buildResetRequest(ncai);
+
+    try {
+      const raw = await getNativeModule().sendPaymentRequest(
+        this.config.host,
+        this.config.port,
+        tlv,
+        10000
+      );
+
+      const fields = parseTlv(raw);
+      const responseCode = fields[TLV_TAGS.CR] ?? '';
+
+      return {
+        success: responseCode === '000',
+        responseCode,
+        error: responseCode !== '000'
+          ? `Reset failed with code: ${responseCode}`
+          : undefined,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, responseCode: '', error: message };
+    }
+  }
+
+  /**
+   * Run terminal referencing / configuration sync (TM=013)
+   *
+   * Must be called at least once before the first payment to download
+   * merchant config from the NAPS server. Also useful for troubleshooting
+   * terminal configuration issues.
+   *
+   * @param registerId Register ID (2 digits)
+   * @param cashierId  Cashier ID (5 digits)
+   */
+  async referencing(
+    registerId: string,
+    cashierId: string
+  ): Promise<ReferencingResult> {
+    const ncai = registerId + cashierId;
+    const tlv = buildReferencingRequest(ncai);
+
+    try {
+      const raw = await getNativeModule().sendPaymentRequest(
+        this.config.host,
+        this.config.port,
+        tlv,
+        this.config.timeout
+      );
+
+      const fields = parseTlv(raw);
+      const responseCode = fields[TLV_TAGS.CR] ?? '';
+      const dpValue = fields[TLV_TAGS.DP];
+      const receipt = dpValue
+        ? parseReceipt(dpValue, ReceiptType.MERCHANT)
+        : undefined;
+
+      return {
+        success: responseCode === '000',
+        responseCode,
+        receipt,
+        error: responseCode !== '000'
+          ? `Referencing failed with code: ${responseCode}`
+          : undefined,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, responseCode: '', error: message };
     }
   }
 
