@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-22
+
+### Added
+- `networkTest(registerId, cashierId)` — sends TM=009 M2M network test and returns RC + round-trip time. Replaces the TCP-only `testConnection()` for proper protocol-level health checks.
+- `cancelPayment(stan, registerId, cashierId, sequence)` — TM=003 void/cancellation of a previous transaction by STAN.
+- `printDuplicate(registerId, cashierId, stan?)` — TM=008 reprint the last receipt or a specific transaction by STAN.
+- `resetPinPad(registerId, cashierId)` — TM=012 reset the terminal to idle ("Attente Caisse") state.
+- `referencing(registerId, cashierId)` — TM=013 sync merchant configuration from the NAPS server. Must run at least once before the first payment.
+- New result types: `CancellationResult`, `NetworkTestResult`, `DuplicateReceiptResult`, `ResetResult`, `ReferencingResult`.
+- New TLV builders exported for advanced use: `buildCancellationRequest`, `buildNetworkTestRequest`, `buildDuplicateRequest`, `buildResetRequest`, `buildReferencingRequest`.
+- Extended `MESSAGE_TYPES` constant to include all 8 message types (TM=003/008/009/012/013 and their responses).
+- Fixed `tsconfig.json`: removed deprecated `baseUrl` and `moduleResolution: node` options (TS5102/TS5108).
+
 ## [1.0.3] - 2026-01-19
 
 ### Added
