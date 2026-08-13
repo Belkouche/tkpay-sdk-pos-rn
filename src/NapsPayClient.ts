@@ -15,6 +15,7 @@ import {
   type ResetResult,
   type ReferencingResult,
   TLV_TAGS,
+  MESSAGE_TYPES,
   ReceiptType,
   NapsError,
   ErrorCode,
@@ -306,14 +307,27 @@ export class NapsPayClient {
    * @param cashierId  Cashier ID (5 digits)
    * @param sequence   Sequence number of the original transaction
    */
+  /**
+   * Cancel (void) a previous transaction (TM=003)
+   *
+   * NapsPay v5.4.4+ requires [amountCentimes] (TAG 002) in the frame and
+   * may respond with MT=104 (correction) in addition to MT=103. Both are success.
+   *
+   * @param stan       STAN of the transaction to cancel
+   * @param registerId Register ID (2 digits)
+   * @param cashierId  Cashier ID (5 digits)
+   * @param sequence   Sequence number of the original transaction
+   * @param amountCentimes  Original amount in centimes (required for v5.4.4+)
+   */
   async cancelPayment(
     stan: string,
     registerId: string,
     cashierId: string,
-    sequence: string
+    sequence: string,
+    amountCentimes?: number
   ): Promise<CancellationResult> {
     const ncai = registerId + cashierId;
-    const tlv = buildCancellationRequest(stan, ncai, sequence);
+    const tlv = buildCancellationRequest(stan, ncai, sequence, amountCentimes);
 
     try {
       const raw = await getNativeModule().sendPaymentRequest(
@@ -325,15 +339,19 @@ export class NapsPayClient {
 
       const fields = parseTlv(raw);
       const responseCode = fields[TLV_TAGS.CR] ?? '';
-      const responseStan = fields[TLV_TAGS.STAN];
+      const mt = fields[TLV_TAGS.TM] ?? '';
+      const success =
+        (mt === MESSAGE_TYPES.CANCELLATION_RESPONSE ||
+          mt === MESSAGE_TYPES.CANCELLATION_CORRECTION) &&
+        responseCode === '000';
 
       return {
-        success: responseCode === '000',
+        success,
         responseCode,
-        stan: responseStan,
-        error: responseCode !== '000'
-          ? `Cancellation failed with code: ${responseCode}`
-          : undefined,
+        stan: fields[TLV_TAGS.STAN],
+        error: success
+          ? undefined
+          : `Cancellation failed with code: ${responseCode}`,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';

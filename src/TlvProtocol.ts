@@ -103,23 +103,32 @@ export function buildSettlementRequest(ncai: string): string {
 
 /**
  * Build cancellation request TLV (TM=003)
+ *
+ * NapsPay v5.4.4+ requires the original amount (TAG 002) in the frame.
+ * Pass `amountCentimes` when targeting v5.4.4+.
+ *
  * @param stan   STAN of the transaction to cancel
  * @param ncai   Register(2) + Cashier(5)
  * @param sequence  Original sequence number
+ * @param amountCentimes  Original amount in centimes (required for v5.4.4+)
  */
 export function buildCancellationRequest(
   stan: string,
   ncai: string,
-  sequence: string
+  sequence: string,
+  amountCentimes?: number
 ): string {
-  return (
-    buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_REQUEST) +
+  let msg = buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_REQUEST);
+  if (amountCentimes !== undefined) {
+    msg += buildField(TLV_TAGS.MT, amountCentimes.toString());
+  }
+  msg +=
     buildField(TLV_TAGS.STAN, stan) +
     buildField(TLV_TAGS.NCAI, ncai) +
     buildField(TLV_TAGS.NSA, sequence) +
     buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime())
-  );
+    buildField(TLV_TAGS.HE, getCurrentTime());
+  return msg;
 }
 
 /**
