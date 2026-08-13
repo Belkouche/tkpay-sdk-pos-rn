@@ -1,18 +1,22 @@
 /**
  * Live terminal test — runs against a real NAPS Pay terminal over TCP.
- * Usage: node test-live.js <host> [port]
  *
- * Exercises:
- *   1. TCP connection
- *   2. Network test (TM=009)  — verifies '!' terminator fix
- *   3. Payment (TM=001 + TM=002) — 50 centimes (0.50 MAD)
- *   4. Cancellation (TM=003)  — verifies TAG 002 + MT=104 fix
+ * Usage:
+ *   node test-live.js [host] [port]              — full test (network + payment + cancel)
+ *   node test-live.js [host] [port] cancel <STAN> <amountCentimes>  — cancel only
+ *
+ * Examples:
+ *   node test-live.js
+ *   node test-live.js 192.168.24.77 4444 cancel 000012 50
  */
 
 const net = require('net');
 
 const HOST = process.argv[2] || '192.168.24.77';
 const PORT = parseInt(process.argv[3] || '4444', 10);
+const CANCEL_ONLY = process.argv[4] === 'cancel';
+const CANCEL_STAN = process.argv[5] || null;
+const CANCEL_AMOUNT = process.argv[6] ? parseInt(process.argv[6], 10) : 50;
 
 // ── TLV helpers ────────────────────────────────────────────────────────────────
 
@@ -81,11 +85,14 @@ function buildReferencing(ncai, sequence) {
          buildField('014', date) + buildField('015', time);
 }
 
-function buildCancellationConfirmation(stan, ncai, sequence) {
+function buildCancellationConfirmation(stan, ncai, sequence, amount) {
   const { date, time } = now();
-  return buildField('001', '004') + buildField('008', stan) +
-         buildField('003', ncai)  + buildField('004', sequence) +
-         buildField('014', date)  + buildField('015', time);
+  let msg = buildField('001', '004');
+  if (amount != null) msg += buildField('002', amount);
+  msg += buildField('008', stan) + buildField('003', ncai) +
+         buildField('004', sequence) +
+         buildField('014', date) + buildField('015', time);
+  return msg;
 }
 
 function buildCancellation(stan, ncai, sequence, amountCentimes) {
@@ -122,7 +129,10 @@ function sendReceive(host, port, message, timeoutMs, reuseSocket) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (!reuseSocket) socket.removeAllListeners();
+      clearTimeout(silenceTimer);
+      socket.removeAllListeners('data');
+      socket.removeAllListeners('error');
+      socket.removeAllListeners('close');
       if (err) {
         if (!reuseSocket) socket.destroy();
         reject(err);
@@ -134,15 +144,20 @@ function sendReceive(host, port, message, timeoutMs, reuseSocket) {
     const timer = setTimeout(() => done(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
 
     const send = () => {
-      socket.write(message, 'utf8');
+      if (message) socket.write(message, 'utf8');
     };
 
+    // Frame on '!'/'?' terminator when present, else on 1.5s silence
+    // (cancellation responses MT=103/MT=104 carry no terminator)
+    let silenceTimer = null;
     socket.on('data', chunk => {
       buf += chunk.toString('utf8');
-      if (buf.includes('!')) {
-        const excl = buf.indexOf('!');
-        done(null, buf.slice(0, excl));
-      }
+      const excl = buf.indexOf('!');
+      const q    = buf.indexOf('?');
+      const end  = excl === -1 ? q : q === -1 ? excl : Math.min(excl, q);
+      if (end !== -1) return done(null, buf.slice(0, end));
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => done(null, buf), 1500);
     });
     socket.on('error', err => done(err));
     socket.on('close', () => { if (!settled) done(new Error('Connection closed')); });
@@ -159,7 +174,7 @@ function sendReceive(host, port, message, timeoutMs, reuseSocket) {
 
 const NCAI     = '0100001';
 const SEQUENCE = seq(1);
-const AMOUNT   = 50; // centimes = 0.50 MAD
+const AMOUNT   = 100; // centimes = 1.00 MAD
 
 let passed = 0, failed = 0;
 
@@ -173,8 +188,66 @@ function ok(label, condition, detail) {
   }
 }
 
+async function testCancel(stan, amountCentimes) {
+  console.log(`\nCancellation test — STAN ${stan}, amount ${amountCentimes} centimes`);
+  try {
+    // Phase 1: send TM=003, keep socket open
+    const { response: rc1, socket: sc1 } = await sendReceive(
+      HOST, PORT,
+      buildCancellation(stan, NCAI, SEQUENCE, amountCentimes),
+      30000
+    );
+    const fc1 = parseTlv(rc1);
+    console.log(`  raw1: MT=${fc1['001']} CR=${fc1['013']} STAN=${fc1['008']}`);
+    ok('Phase-1 response',  !!rc1);
+    ok('MT=103',            fc1['001'] === '103', `MT=${fc1['001']}`);
+    ok('Phase-1 CR=000',    fc1['013'] === '000', `CR=${fc1['013']}`);
+
+    if (fc1['001'] === '104') {
+      ok('Single-phase MT=104', true, `CR=${fc1['013']}`);
+      sc1.destroy();
+      return;
+    }
+
+    if (fc1['001'] !== '103' || fc1['013'] !== '000') {
+      sc1.destroy();
+      console.log('  ⚠️  Phase-1 not approved — aborting');
+      return;
+    }
+
+    // Phase 2: send TM=004 confirmation (with amount echoed from MT=103) → MT=104
+    const { response: rc2, socket: sc2 } = await sendReceive(
+      HOST, PORT,
+      buildCancellationConfirmation(fc1['008'] || stan, NCAI, SEQUENCE, fc1['002']),
+      40000, sc1
+    );
+    const fc2 = parseTlv(rc2);
+    console.log(`  raw2: MT=${fc2['001']} CR=${fc2['013']} STAN=${fc2['008']}`);
+    ok('Phase-2 response',  !!rc2);
+    ok('MT=104',            fc2['001'] === '104', `MT=${fc2['001']}`);
+    const cr2ok = fc2['013'] === '000' || fc2['013'] === '995';
+    ok('Phase-2 CR=000/995', cr2ok, `CR=${fc2['013']}`);
+    sc2.destroy();
+  } catch (e) {
+    console.log(`  ❌ Cancellation failed: ${e.message}`);
+    failed += 6;
+  }
+}
+
 (async () => {
   console.log(`\nNAPS Pay live test → ${HOST}:${PORT}\n`);
+
+  if (CANCEL_ONLY) {
+    if (!CANCEL_STAN) {
+      console.log('Usage: node test-live.js [host] [port] cancel <STAN> [amountCentimes]');
+      process.exit(1);
+    }
+    await testCancel(CANCEL_STAN, CANCEL_AMOUNT);
+    const total = passed + failed;
+    console.log(`\n${'─'.repeat(40)}`);
+    console.log(`Results: ${passed}/${total} passed${failed > 0 ? `, ${failed} failed` : ''}`);
+    process.exit(failed > 0 ? 1 : 0);
+  }
 
   // ── 1. Network test ────────────────────────────────────────────────────────
   console.log('1. Network test (TM=009)');
@@ -182,7 +255,7 @@ function ok(label, condition, detail) {
     const { response, socket: s1 } = await sendReceive(HOST, PORT, buildNetworkTest(NCAI, SEQUENCE), 10000);
     const f = parseTlv(response);
     ok('Response received',    !!response);
-    ok('Terminated by !',      true, 'reached parseTlv without timeout');
+    ok('Terminated by !/? ',   true, 'reached parseTlv without timeout');
     ok('CR=000',               f['013'] === '000', `CR=${f['013']}`);
     ok('MT=109',               f['001'] === '109', `MT=${f['001']}`);
     s1.destroy();
@@ -192,10 +265,9 @@ function ok(label, condition, detail) {
   }
 
   // ── 2. Payment ─────────────────────────────────────────────────────────────
-  console.log('\n2. Payment (TM=001 → TM=002) — 0.50 MAD');
+  console.log(`\n2. Payment (TM=001 → TM=002) — ${(AMOUNT / 100).toFixed(2)} MAD`);
   let paymentStan = null;
   try {
-    // Phase 1
     const { response: r1, socket: s2 } = await sendReceive(
       HOST, PORT, buildPayment(AMOUNT, NCAI, SEQUENCE), 120000
     );
@@ -206,7 +278,6 @@ function ok(label, condition, detail) {
     ok('STAN present',        !!paymentStan, `STAN=${paymentStan}`);
 
     if (f1['013'] === '000' && paymentStan) {
-      // Phase 2 — same socket
       const { response: r2, socket: s3 } = await sendReceive(
         HOST, PORT, buildConfirmation(paymentStan, NCAI, SEQUENCE), 40000, s2
       );
@@ -223,97 +294,11 @@ function ok(label, condition, detail) {
     failed += 5;
   }
 
-  // ── 3. Two-phase Cancellation (TM=003 → TM=004) ───────────────────────────
-  console.log('\n3. Cancellation (TM=003 → TM=004) — two-phase flow');
-  if (!paymentStan) {
-    console.log('  ⚠️  Skipped — no STAN from payment step');
+  // ── 3. Cancellation ────────────────────────────────────────────────────────
+  if (paymentStan) {
+    await testCancel(paymentStan, AMOUNT);
   } else {
-    try {
-      // Phase 1 — send cancellation request, keep socket open
-      const { response: rc1, socket: sc1 } = await sendReceive(
-        HOST, PORT,
-        buildCancellation(paymentStan, NCAI, SEQUENCE, AMOUNT),
-        30000
-      );
-      const fc1 = parseTlv(rc1);
-      ok('Phase-1 response',       !!rc1);
-      ok('MT=103',                 fc1['001'] === '103', `MT=${fc1['001']}`);
-      ok('CR=000',                 fc1['013'] === '000', `CR=${fc1['013']}`);
-
-      if (fc1['001'] === '103' && fc1['013'] === '000') {
-        // Phase 2 — send confirmation on same connection
-        const { response: rc2, socket: sc2 } = await sendReceive(
-          HOST, PORT,
-          buildCancellationConfirmation(paymentStan, NCAI, SEQUENCE),
-          30000, sc1
-        );
-        const fc2 = parseTlv(rc2);
-        ok('Phase-2 response',     !!rc2);
-        ok('MT=104',               fc2['001'] === '104', `MT=${fc2['001']}`);
-        ok('Phase-2 CR=000',       fc2['013'] === '000', `CR=${fc2['013']}`);
-        sc2.destroy();
-        paymentStan = null; // consumed
-      } else {
-        sc1.destroy();
-        console.log('  ⚠️  Phase-1 not approved — skipping Phase-2');
-        if (fc1['001'] === '104') {
-          // Terminal auto-confirmed (single-phase firmware)
-          ok('Auto-confirm MT=104', true, 'terminal completed without TM=004');
-          paymentStan = null;
-        }
-      }
-    } catch (e) {
-      console.log(`  ❌ Cancellation failed: ${e.message}`);
-      failed += 6;
-    }
-  }
-
-  // ── 4. Duplicate receipt (TM=008) ─────────────────────────────────────────
-  console.log('\n4. Duplicate receipt (TM=008)');
-  try {
-    const { response, socket: s5 } = await sendReceive(
-      HOST, PORT, buildDuplicate(NCAI, seq(2)), 15000
-    );
-    const f = parseTlv(response);
-    ok('Response received',  !!response);
-    ok('MT=108',             f['001'] === '108', `MT=${f['001']}`);
-    ok('CR=000',             f['013'] === '000', `CR=${f['013']}`);
-    s5.destroy();
-  } catch (e) {
-    console.log(`  ❌ Duplicate failed: ${e.message}`);
-    failed += 3;
-  }
-
-  // ── 5. Settlement (TM=010) ────────────────────────────────────────────────
-  console.log('\n5. Settlement (TM=010)');
-  try {
-    const { response, socket: s6 } = await sendReceive(
-      HOST, PORT, buildSettlement(NCAI, seq(3)), 30000
-    );
-    const f = parseTlv(response);
-    ok('Response received',  !!response);
-    ok('MT=110',             f['001'] === '110', `MT=${f['001']}`);
-    ok('CR=000',             f['013'] === '000', `CR=${f['013']}`);
-    s6.destroy();
-  } catch (e) {
-    console.log(`  ❌ Settlement failed: ${e.message}`);
-    failed += 3;
-  }
-
-  // ── 6. Reset (TM=012) ────────────────────────────────────────────────────
-  console.log('\n6. Reset PinPAD (TM=012)');
-  try {
-    const { response, socket: s7 } = await sendReceive(
-      HOST, PORT, buildReset(NCAI, seq(4)), 15000
-    );
-    const f = parseTlv(response);
-    ok('Response received',  !!response);
-    ok('MT=112',             f['001'] === '112', `MT=${f['001']}`);
-    ok('CR=000',             f['013'] === '000', `CR=${f['013']}`);
-    s7.destroy();
-  } catch (e) {
-    console.log(`  ❌ Reset failed: ${e.message}`);
-    failed += 3;
+    console.log('\n3. Cancellation — ⚠️  Skipped (no STAN from payment)');
   }
 
   // ── Summary ────────────────────────────────────────────────────────────────

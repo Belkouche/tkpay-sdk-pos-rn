@@ -35,6 +35,7 @@ export {
   buildConfirmationRequest,
   buildSettlementRequest,
   buildCancellationRequest,
+  buildCancellationConfirmation,
   buildNetworkTestRequest,
   buildDuplicateRequest,
   buildResetRequest,

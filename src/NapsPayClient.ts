@@ -26,6 +26,7 @@ import {
   buildConfirmationRequest,
   buildSettlementRequest,
   buildCancellationRequest,
+  buildCancellationConfirmation,
   buildNetworkTestRequest,
   buildDuplicateRequest,
   buildResetRequest,
@@ -297,21 +298,12 @@ export class NapsPayClient {
   }
 
   /**
-   * Cancel (void) a previous transaction (TM=003)
+   * Cancel (void) a previous transaction — two-phase flow (TM=003 → TM=004)
    *
-   * Can only cancel the last approved transaction while the terminal
-   * is still on the same session. Send the STAN returned by processPayment().
-   *
-   * @param stan       STAN of the transaction to cancel
-   * @param registerId Register ID (2 digits)
-   * @param cashierId  Cashier ID (5 digits)
-   * @param sequence   Sequence number of the original transaction
-   */
-  /**
-   * Cancel (void) a previous transaction (TM=003)
-   *
-   * NapsPay v5.4.4+ requires [amountCentimes] (TAG 002) in the frame and
-   * may respond with MT=104 (correction) in addition to MT=103. Both are success.
+   * NapsPay v5.4.4+ requires [amountCentimes] (TAG 002) in the TM=003 frame.
+   * Flow on a single TCP connection:
+   *   1. Send TM=003 → terminal replies MT=103 (CR=000 = accepted)
+   *   2. Send TM=004 → terminal replies MT=104 with the final result
    *
    * @param stan       STAN of the transaction to cancel
    * @param registerId Register ID (2 digits)
@@ -330,7 +322,7 @@ export class NapsPayClient {
     const tlv = buildCancellationRequest(stan, ncai, sequence, amountCentimes);
 
     try {
-      // Phase 1: Send TM=003, keep connection open
+      // Phase 1: send TM=003, keep connection open — terminal replies MT=103 immediately
       const raw1 = await getNativeModule().sendPaymentRequest(
         this.config.host,
         this.config.port,
@@ -342,7 +334,7 @@ export class NapsPayClient {
       const mt1 = fields1[TLV_TAGS.TM] ?? '';
       const cr1 = fields1[TLV_TAGS.CR] ?? '';
 
-      // MT=104 means terminal auto-confirmed (single-phase firmware)
+      // MT=104 direct means already finalised (shouldn't normally happen)
       if (mt1 === MESSAGE_TYPES.CANCELLATION_CORRECTION) {
         return {
           success: cr1 === '000',
@@ -352,32 +344,38 @@ export class NapsPayClient {
         };
       }
 
-      // MT=103: terminal is showing "demande de redressement" to customer.
-      // Wait for customer to confirm on terminal → terminal sends MT=104 on same connection.
-      if (mt1 === MESSAGE_TYPES.CANCELLATION_RESPONSE && cr1 === '000') {
-        // Phase 2: receive MT=104 (no data to send — terminal pushes it automatically)
-        const raw2 = await getNativeModule().sendConfirmation(
-          '', // empty — we are only reading, not sending
-          this.config.confirmationTimeout
-        );
-
-        const fields2 = parseTlv(raw2);
-        const cr2 = fields2[TLV_TAGS.CR] ?? '';
-
+      if (mt1 !== MESSAGE_TYPES.CANCELLATION_RESPONSE || cr1 !== '000') {
         return {
-          success: cr2 === '000',
-          responseCode: cr2,
-          stan: fields2[TLV_TAGS.STAN] ?? fields1[TLV_TAGS.STAN],
-          error: cr2 !== '000' ? `Cancellation confirmation failed with code: ${cr2}` : undefined,
+          success: false,
+          responseCode: cr1,
+          stan: fields1[TLV_TAGS.STAN],
+          error: `Cancellation failed with code: ${cr1}`,
         };
       }
 
-      // Any other response is a failure
+      // Phase 2: send TM=004 confirmation on the same connection → MT=104.
+      // Echo the amount (TAG 002) from the MT=103 response — required by v5.4.4+.
+      const confirmTlv = buildCancellationConfirmation(
+        fields1[TLV_TAGS.STAN] ?? stan,
+        ncai,
+        sequence,
+        fields1[TLV_TAGS.MT]
+      );
+      const raw2 = await getNativeModule().sendConfirmation(
+        confirmTlv,
+        this.config.confirmationTimeout
+      );
+
+      const fields2 = parseTlv(raw2);
+      const cr2 = fields2[TLV_TAGS.CR] ?? '';
+      // CR=000 = confirmed, CR=995 = host processing (also success)
+      const success2 = cr2 === '000' || cr2 === '995';
+
       return {
-        success: false,
-        responseCode: cr1,
-        stan: fields1[TLV_TAGS.STAN],
-        error: `Cancellation failed with code: ${cr1}`,
+        success: success2,
+        responseCode: cr2,
+        stan: fields2[TLV_TAGS.STAN] ?? fields1[TLV_TAGS.STAN],
+        error: !success2 ? `Cancellation failed with code: ${cr2}` : undefined,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';

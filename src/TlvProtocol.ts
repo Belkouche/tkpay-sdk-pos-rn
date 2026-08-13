@@ -132,6 +132,32 @@ export function buildCancellationRequest(
 }
 
 /**
+ * Build cancellation confirmation request TLV (TM=004)
+ * Sent on the same connection after receiving MT=103 from TM=003.
+ *
+ * @param amount  Amount echoed from the MT=103 response (TAG 002, 12-digit) —
+ *                required by NapsPay v5.4.4+
+ */
+export function buildCancellationConfirmation(
+  stan: string,
+  ncai: string,
+  sequence: string,
+  amount?: string
+): string {
+  let msg = buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_CONFIRMATION_REQUEST);
+  if (amount !== undefined) {
+    msg += buildField(TLV_TAGS.MT, amount);
+  }
+  msg +=
+    buildField(TLV_TAGS.STAN, stan) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence) +
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime());
+  return msg;
+}
+
+/**
  * Build network test request TLV (TM=009)
  */
 export function buildNetworkTestRequest(ncai: string): string {
