@@ -221,8 +221,8 @@ export function parseTlv(tlvString: string): Record<string, string> {
     const tag = tlvString.substring(index, index + 3);
     const lengthStr = tlvString.substring(index + 3, index + 6);
 
-    // Validate length is numeric
-    if (!/^\d+$/.test(lengthStr)) break;
+    // Both tag and length must be 3-digit numeric strings
+    if (!/^\d{3}$/.test(tag) || !/^\d{3}$/.test(lengthStr)) break;
 
     const length = parseInt(lengthStr, 10);
 

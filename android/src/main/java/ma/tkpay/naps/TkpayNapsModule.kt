@@ -2,9 +2,8 @@ package ma.tkpay.naps
 
 import com.facebook.react.bridge.*
 import kotlinx.coroutines.*
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.PrintWriter
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -16,8 +15,8 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var activeSocket: Socket? = null
-    private var writer: PrintWriter? = null
-    private var reader: BufferedReader? = null
+    private var outputStream: OutputStream? = null
+    private var inputStream: InputStream? = null
 
     override fun getName(): String = "TkpayNaps"
 
@@ -50,12 +49,12 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
                 socket.connect(InetSocketAddress(host, port), timeout)
 
                 activeSocket = socket
-                writer = PrintWriter(socket.getOutputStream(), true)
-                reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+                outputStream = socket.getOutputStream()
+                inputStream = socket.getInputStream()
 
                 // Send data
-                writer?.print(tlvData)
-                writer?.flush()
+                outputStream?.write(tlvData.toByteArray(Charsets.UTF_8))
+                outputStream?.flush()
 
                 // Receive response
                 val response = receiveResponse(timeout)
@@ -88,8 +87,8 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
                 socket.soTimeout = timeout
 
                 // Send confirmation
-                writer?.print(tlvData)
-                writer?.flush()
+                outputStream?.write(tlvData.toByteArray(Charsets.UTF_8))
+                outputStream?.flush()
 
                 // Receive response
                 val response = receiveResponse(timeout)
@@ -125,48 +124,50 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Receive response from socket.
-     * NapsPay uses '!' as the end-of-message terminator on TCP responses.
-     * We read until '!' is seen, using a 1-second inter-chunk silence as fallback.
+     * Receive a complete TLV response from the terminal.
+     *
+     * Terminal firmware variants differ:
+     *   - Some append '!' as end-of-message terminator
+     *   - Some append '?' as end-of-message terminator
+     *   - Some send nothing and just stop writing
+     *
+     * Strategy: read with full timeout for the first byte, then drain with
+     * a 1-second inter-chunk timeout. Stop immediately on '!' or '?'.
+     * Strip the terminator before returning so the TLV parser sees clean data.
      */
     private fun receiveResponse(timeout: Int): String {
-        val response = StringBuilder()
-        val buffer = CharArray(8192)
+        val stream = inputStream ?: throw IllegalStateException("No active socket")
         val socket = activeSocket ?: throw IllegalStateException("No active socket")
+        val rawBytes = mutableListOf<Byte>()
+        val buf = ByteArray(8192)
 
-        // Full timeout for the first read — payment waits for customer to tap
+        // First read — full timeout (payment waits for customer to tap)
         socket.soTimeout = timeout
+        val firstCount = stream.read(buf)
+        if (firstCount == -1) throw IllegalStateException("Connection closed by terminal")
+        for (i in 0 until firstCount) rawBytes.add(buf[i])
 
-        val initialCount = reader?.read(buffer) ?: -1
-        if (initialCount == -1) {
-            throw IllegalStateException("Connection closed by terminal")
-        }
-        if (initialCount > 0) {
-            response.append(buffer, 0, initialCount)
-        }
-
-        // Drain remaining chunks until '!' terminator or 1-second silence
+        // Drain until '!' / '?' terminator or 1-second silence
         socket.soTimeout = 1000
-        while (!response.contains('!')) {
+        while (rawBytes.last() != '!'.code.toByte() && rawBytes.last() != '?'.code.toByte()) {
             try {
-                val count = reader?.read(buffer) ?: -1
-                if (count <= 0) break
-                response.append(buffer, 0, count)
+                val n = stream.read(buf)
+                if (n <= 0) break
+                for (i in 0 until n) rawBytes.add(buf[i])
             } catch (e: java.net.SocketTimeoutException) {
                 break
             }
         }
 
-        // Restore full timeout for subsequent operations
         socket.soTimeout = timeout
 
-        if (response.isEmpty()) {
-            throw IllegalStateException("Empty response from terminal")
-        }
+        if (rawBytes.isEmpty()) throw IllegalStateException("Empty response from terminal")
 
-        // Strip trailing '!' — the TLV parser doesn't expect it
-        val excl = response.indexOf('!')
-        return if (excl >= 0) response.substring(0, excl) else response.toString()
+        val response = String(rawBytes.toByteArray(), Charsets.UTF_8)
+
+        // Strip terminator if present
+        return if (response.last() == '!' || response.last() == '?')
+            response.dropLast(1) else response
     }
 
     /**
@@ -174,14 +175,14 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
      */
     private fun closeConnection() {
         try {
-            writer?.close()
-            reader?.close()
+            outputStream?.close()
+            inputStream?.close()
             activeSocket?.close()
         } catch (e: Exception) {
             // Ignore errors during close
         } finally {
-            writer = null
-            reader = null
+            outputStream = null
+            inputStream = null
             activeSocket = null
         }
     }

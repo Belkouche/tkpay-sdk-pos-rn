@@ -231,9 +231,10 @@ class TkpayNaps: NSObject {
             throw inputStream.streamError ?? NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Read failed"])
         }
 
-        // Drain until '!' terminator or 1-second silence
+        // Drain until '!' or '?' terminator, or 1-second silence
         let bangByte = UInt8(ascii: "!")
-        while !response.contains(bangByte) {
+        let questionByte = UInt8(ascii: "?")
+        while !response.contains(bangByte) && !response.contains(questionByte) {
             let drainEnd = Date().addingTimeInterval(1.0)
             var gotData = false
             while Date() < drainEnd {
@@ -256,9 +257,9 @@ class TkpayNaps: NSObject {
             throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Empty response"])
         }
 
-        // Strip trailing '!' — the TLV parser doesn't expect it
-        if let bangRange = responseString.range(of: "!") {
-            return String(responseString[responseString.startIndex..<bangRange.lowerBound])
+        // Strip trailing terminator ('!' or '?') if present — TLV parser doesn't expect it
+        if responseString.last == "!" || responseString.last == "?" {
+            return String(responseString.dropLast())
         }
         return responseString
     }
