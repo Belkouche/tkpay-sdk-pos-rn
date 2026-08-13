@@ -193,6 +193,8 @@ class TkpayNaps: NSObject {
         }
     }
 
+    // NapsPay uses '!' as the end-of-message terminator on TCP responses.
+    // We read until '!' is seen, using 1-second inter-chunk silence as fallback.
     private func receiveResponse(timeout: Int) throws -> String {
         guard let inputStream = inputStream else {
             throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "No input stream"])
@@ -202,30 +204,26 @@ class TkpayNaps: NSObject {
         let bufferSize = 8192
         var buffer = [UInt8](repeating: 0, count: bufferSize)
 
-        // Wait for initial data with full timeout
-        // This is critical - payment can take 30-120 seconds while customer taps card
+        // Wait for initial data with full timeout — payment waits for customer to tap
         let timeoutSeconds = Double(timeout) / 1000.0
         let startTime = Date()
 
         while Date().timeIntervalSince(startTime) < timeoutSeconds {
-            if inputStream.hasBytesAvailable {
-                break
-            }
+            if inputStream.hasBytesAvailable { break }
             if inputStream.streamStatus == .error {
                 throw inputStream.streamError ?? NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Stream error"])
             }
             if inputStream.streamStatus == .closed || inputStream.streamStatus == .atEnd {
                 throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Connection closed"])
             }
-            // Check every 100ms
             Thread.sleep(forTimeInterval: 0.1)
         }
 
-        if !inputStream.hasBytesAvailable {
+        guard inputStream.hasBytesAvailable else {
             throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Timeout waiting for response"])
         }
 
-        // Read initial data
+        // Read initial chunk
         let bytesRead = inputStream.read(&buffer, maxLength: bufferSize)
         if bytesRead > 0 {
             response.append(contentsOf: buffer[0..<bytesRead])
@@ -233,25 +231,35 @@ class TkpayNaps: NSObject {
             throw inputStream.streamError ?? NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Read failed"])
         }
 
-        // Read any remaining data with short timeout (500ms)
-        let endTime = Date().addingTimeInterval(0.5)
-        while Date() < endTime {
-            if inputStream.hasBytesAvailable {
-                let additionalBytesRead = inputStream.read(&buffer, maxLength: bufferSize)
-                if additionalBytesRead > 0 {
-                    response.append(contentsOf: buffer[0..<additionalBytesRead])
-                } else {
-                    break
+        // Drain until '!' terminator or 1-second silence
+        let bangByte = UInt8(ascii: "!")
+        while !response.contains(bangByte) {
+            let drainEnd = Date().addingTimeInterval(1.0)
+            var gotData = false
+            while Date() < drainEnd {
+                if inputStream.hasBytesAvailable {
+                    let n = inputStream.read(&buffer, maxLength: bufferSize)
+                    if n > 0 {
+                        response.append(contentsOf: buffer[0..<n])
+                        gotData = true
+                        break
+                    } else {
+                        break
+                    }
                 }
-            } else {
                 Thread.sleep(forTimeInterval: 0.05)
             }
+            if !gotData { break }
         }
 
         guard let responseString = String(data: response, encoding: .utf8), !responseString.isEmpty else {
             throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Empty response"])
         }
 
+        // Strip trailing '!' — the TLV parser doesn't expect it
+        if let bangRange = responseString.range(of: "!") {
+            return String(responseString[responseString.startIndex..<bangRange.lowerBound])
+        }
         return responseString
     }
 

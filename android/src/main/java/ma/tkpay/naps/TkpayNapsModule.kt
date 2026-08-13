@@ -125,54 +125,48 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Receive response from socket
-     * Uses the provided timeout for initial read (waiting for terminal response)
-     * Then uses short timeout for detecting end of message
+     * Receive response from socket.
+     * NapsPay uses '!' as the end-of-message terminator on TCP responses.
+     * We read until '!' is seen, using a 1-second inter-chunk silence as fallback.
      */
     private fun receiveResponse(timeout: Int): String {
         val response = StringBuilder()
         val buffer = CharArray(8192)
         val socket = activeSocket ?: throw IllegalStateException("No active socket")
 
-        // Use the full timeout for the first read (waiting for terminal to respond)
-        // This is critical - payment can take 30-120 seconds while customer taps card
+        // Full timeout for the first read — payment waits for customer to tap
         socket.soTimeout = timeout
 
-        try {
-            // First read - wait for terminal response with full timeout
-            val initialCount = reader?.read(buffer) ?: -1
-            if (initialCount == -1) {
-                throw IllegalStateException("Connection closed by terminal")
-            }
-            if (initialCount > 0) {
-                response.append(buffer, 0, initialCount)
-            }
-
-            // Now set short timeout to detect end of message
-            // (check if more data is available)
-            socket.soTimeout = 500
-
-            // Read any remaining data with short timeout
-            while (true) {
-                try {
-                    val count = reader?.read(buffer) ?: -1
-                    if (count <= 0) break
-                    response.append(buffer, 0, count)
-                } catch (e: java.net.SocketTimeoutException) {
-                    // Timeout means we have all data - this is expected
-                    break
-                }
-            }
-        } finally {
-            // Restore original timeout for potential future reads
-            socket.soTimeout = timeout
+        val initialCount = reader?.read(buffer) ?: -1
+        if (initialCount == -1) {
+            throw IllegalStateException("Connection closed by terminal")
         }
+        if (initialCount > 0) {
+            response.append(buffer, 0, initialCount)
+        }
+
+        // Drain remaining chunks until '!' terminator or 1-second silence
+        socket.soTimeout = 1000
+        while (!response.contains('!')) {
+            try {
+                val count = reader?.read(buffer) ?: -1
+                if (count <= 0) break
+                response.append(buffer, 0, count)
+            } catch (e: java.net.SocketTimeoutException) {
+                break
+            }
+        }
+
+        // Restore full timeout for subsequent operations
+        socket.soTimeout = timeout
 
         if (response.isEmpty()) {
             throw IllegalStateException("Empty response from terminal")
         }
 
-        return response.toString()
+        // Strip trailing '!' — the TLV parser doesn't expect it
+        val excl = response.indexOf('!')
+        return if (excl >= 0) response.substring(0, excl) else response.toString()
     }
 
     /**
