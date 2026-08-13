@@ -86,9 +86,11 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
                 // Update timeout
                 socket.soTimeout = timeout
 
-                // Send confirmation
-                outputStream?.write(tlvData.toByteArray(Charsets.UTF_8))
-                outputStream?.flush()
+                // Send data only if non-empty (empty = receive-only, e.g. waiting for MT=104)
+                if (tlvData.isNotEmpty()) {
+                    outputStream?.write(tlvData.toByteArray(Charsets.UTF_8))
+                    outputStream?.flush()
+                }
 
                 // Receive response
                 val response = receiveResponse(timeout)

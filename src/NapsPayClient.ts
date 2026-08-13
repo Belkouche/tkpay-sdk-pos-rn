@@ -330,28 +330,54 @@ export class NapsPayClient {
     const tlv = buildCancellationRequest(stan, ncai, sequence, amountCentimes);
 
     try {
-      const raw = await getNativeModule().sendPaymentRequest(
+      // Phase 1: Send TM=003, keep connection open
+      const raw1 = await getNativeModule().sendPaymentRequest(
         this.config.host,
         this.config.port,
         tlv,
         this.config.timeout
       );
 
-      const fields = parseTlv(raw);
-      const responseCode = fields[TLV_TAGS.CR] ?? '';
-      const mt = fields[TLV_TAGS.TM] ?? '';
-      const success =
-        (mt === MESSAGE_TYPES.CANCELLATION_RESPONSE ||
-          mt === MESSAGE_TYPES.CANCELLATION_CORRECTION) &&
-        responseCode === '000';
+      const fields1 = parseTlv(raw1);
+      const mt1 = fields1[TLV_TAGS.TM] ?? '';
+      const cr1 = fields1[TLV_TAGS.CR] ?? '';
 
+      // MT=104 means terminal auto-confirmed (single-phase firmware)
+      if (mt1 === MESSAGE_TYPES.CANCELLATION_CORRECTION) {
+        return {
+          success: cr1 === '000',
+          responseCode: cr1,
+          stan: fields1[TLV_TAGS.STAN],
+          error: cr1 !== '000' ? `Cancellation failed with code: ${cr1}` : undefined,
+        };
+      }
+
+      // MT=103: terminal is showing "demande de redressement" to customer.
+      // Wait for customer to confirm on terminal → terminal sends MT=104 on same connection.
+      if (mt1 === MESSAGE_TYPES.CANCELLATION_RESPONSE && cr1 === '000') {
+        // Phase 2: receive MT=104 (no data to send — terminal pushes it automatically)
+        const raw2 = await getNativeModule().sendConfirmation(
+          '', // empty — we are only reading, not sending
+          this.config.confirmationTimeout
+        );
+
+        const fields2 = parseTlv(raw2);
+        const cr2 = fields2[TLV_TAGS.CR] ?? '';
+
+        return {
+          success: cr2 === '000',
+          responseCode: cr2,
+          stan: fields2[TLV_TAGS.STAN] ?? fields1[TLV_TAGS.STAN],
+          error: cr2 !== '000' ? `Cancellation confirmation failed with code: ${cr2}` : undefined,
+        };
+      }
+
+      // Any other response is a failure
       return {
-        success,
-        responseCode,
-        stan: fields[TLV_TAGS.STAN],
-        error: success
-          ? undefined
-          : `Cancellation failed with code: ${responseCode}`,
+        success: false,
+        responseCode: cr1,
+        stan: fields1[TLV_TAGS.STAN],
+        error: `Cancellation failed with code: ${cr1}`,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';

@@ -69,8 +69,10 @@ class TkpayNaps: NSObject {
             }
 
             do {
-                // Send confirmation
-                try self.sendData(tlvData)
+                // Send data only if non-empty (empty = receive-only, e.g. waiting for MT=104)
+                if !tlvData.isEmpty {
+                    try self.sendData(tlvData)
+                }
 
                 // Receive response
                 let response = try self.receiveResponse(timeout: timeout)
