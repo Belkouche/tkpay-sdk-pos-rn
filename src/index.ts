@@ -24,6 +24,7 @@ export {
   Alignment,
   ErrorCode,
   NapsError,
+  ProtocolVersion,
   TLV_TAGS,
   MESSAGE_TYPES,
   CURRENCY,
@@ -44,4 +45,9 @@ export {
   parseReceipt,
   receiptToPlainText,
   maskCardNumbersInText,
+  describeResponseCode,
+  isApproved,
+  APPROVED_CODES,
+  RESPONSE_CODES,
+  type ConfirmationOptions,
 } from './TlvProtocol';

@@ -17,6 +17,7 @@ import {
   TLV_TAGS,
   MESSAGE_TYPES,
   ReceiptType,
+  ProtocolVersion,
   NapsError,
   ErrorCode,
 } from './types';
@@ -35,6 +36,7 @@ import {
   parseReceipt,
   maskCardNumber,
   enhanceMerchantReceipt,
+  describeResponseCode,
 } from './TlvProtocol';
 
 // Declare React Native types for build time
@@ -78,6 +80,7 @@ const DEFAULT_CONFIG: Required<Omit<NapsConfig, 'host'>> = {
   port: 4444,
   timeout: 120000,
   confirmationTimeout: 40000,
+  protocolVersion: ProtocolVersion.V2,
 };
 
 /**
@@ -161,8 +164,13 @@ export class NapsPayClient {
         throw NapsError.invalidResponse('Missing STAN');
       }
 
-      // Build confirmation TLV
-      const confirmTlv = buildConfirmationRequest(stan, ncai, sequence);
+      // Build confirmation TLV (v2 §4.2): echo MT/DE + NCAR + DAEX from the
+      // approved Payment Response so the terminal can reinforce coherence checks.
+      const confirmTlv = buildConfirmationRequest(stan, ncai, sequence, {
+        amountCentimes: Math.round(request.amount * 100),
+        ncar: paymentFields[TLV_TAGS.NCAR],
+        daex: paymentFields[TLV_TAGS.DAEX],
+      });
 
       // Phase 2: Send confirmation (on same connection)
       const confirmResponse = await getNativeModule().sendConfirmation(
@@ -613,7 +621,7 @@ export class NapsPayClient {
         errorMessage = 'Transaction cancelled';
         break;
       default:
-        errorMessage = `Payment declined with code: ${responseCode}`;
+        errorMessage = `${describeResponseCode(responseCode)} (code: ${responseCode})`;
     }
 
     return {

@@ -138,8 +138,20 @@ const client = new NapsPayClient({
   port?: number,                // Default: 4444
   timeout?: number,             // Default: 120000 ms (2 min) — time to wait for card tap
   confirmationTimeout?: number, // Default: 40000 ms — Phase 2 window
+  protocolVersion?: ProtocolVersion, // Default: ProtocolVersion.V2
 });
 ```
+
+**`protocolVersion`** selects the NAPS M2M protocol contract:
+
+- `ProtocolVersion.V2` (default) — responses terminated by `!`. The Phase‑2 payment
+  confirmation (TM=002) is enriched per §4.2: it echoes the amount (MT/DE), masked
+  PAN (NCAR) and card expiry (DAEX) from the approved response so the terminal can
+  reinforce its coherence checks.
+- `ProtocolVersion.V1` — responses terminated by `?`.
+
+The native transport accepts either terminator, so the flag documents the intended
+contract; these SDKs are TCP/Sunmi only and default to v2.
 
 ---
 
@@ -470,6 +482,17 @@ try {
 | `909` | System failure / terminal down |
 | `912` | Card issuer unavailable |
 | `995` | Server processing error |
+
+For the full v2 §6 table, use the exported helpers:
+
+```typescript
+import { describeResponseCode, isApproved } from 'react-native-tkpay-naps';
+
+describeResponseCode('116'); // "Insufficient funds"
+describeResponseCode('zzz'); // "Unknown response code: zzz"
+isApproved('000');           // true  (approved codes: 000, 001, 003, 007)
+isApproved('100');           // false
+```
 
 ---
 

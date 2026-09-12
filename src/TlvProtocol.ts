@@ -29,6 +29,119 @@ export function buildField(tag: string, value: string): string {
 }
 
 /**
+ * CR (013) response codes considered a successful approval.
+ * 000 Approved · 001 Approved with identification · 003 Approved (VIP) ·
+ * 007 Approved, microchip update required.
+ */
+export const APPROVED_CODES = new Set<string>(['000', '001', '003', '007']);
+
+/**
+ * Whether a CR (013) response code represents an approval.
+ */
+export function isApproved(cr?: string): boolean {
+  return cr !== undefined && APPROVED_CODES.has(cr);
+}
+
+/**
+ * CR (013) response code descriptions from the NAPS M2M v2 spec §6.
+ */
+export const RESPONSE_CODES: Record<string, string> = {
+  '000': 'Approved',
+  '001': 'Approved with identification',
+  '003': 'Approved (VIP)',
+  '007': 'Approved, microchip update required',
+  '100': 'Do not honour',
+  '101': 'Card expired',
+  '102': 'Fraud suspected',
+  '104': 'Restricted card use',
+  '106': 'Allowed PIN tries exceeded',
+  '107': 'Refer to card issuer',
+  '108': 'Refer to issuer special conditions',
+  '109': 'Invalid merchant',
+  '110': 'Invalid amount',
+  '111': 'Invalid card number',
+  '112': 'PIN information required',
+  '114': 'No account of requested type',
+  '115': 'Requested function not supported',
+  '116': 'Insufficient funds',
+  '117': 'Incorrect PIN',
+  '118': 'Card not registered',
+  '119': 'Transaction not permitted to cardholder',
+  '120': 'Transaction not permitted at terminal',
+  '121': 'Withdrawal limit exceeded',
+  '122': 'Security violation',
+  '123': 'Withdrawal frequency exceeded',
+  '125': 'Card not in service',
+  '126': 'Invalid PIN format',
+  '127': 'PIN length error',
+  '128': 'PIN key sync error',
+  '129': 'Card counterfeiting suspected',
+  '180': 'Credit account does not exist',
+  '181': 'Cheque account does not exist',
+  '182': 'Savings account does not exist',
+  '183': 'Invalid CVV',
+  '184': 'Invalid date',
+  '200': 'Do not honour — capture card',
+  '201': 'Card expired — capture card',
+  '202': 'Fraud suspected — capture card',
+  '204': 'Restricted card — capture card',
+  '205': 'Security service — capture card',
+  '206': 'PIN tries exceeded — capture card',
+  '207': 'Special conditions — capture card',
+  '208': 'Lost card — capture card',
+  '209': 'Stolen card — capture card',
+  '210': 'Counterfeiting suspected — capture card',
+  '280': 'Alternative amount cancelled',
+  '299': 'Capture card',
+  '300': 'Processing completed',
+  '301': 'Not supported by recipient',
+  '302': 'Record not found on file',
+  '303': 'Duplicate record, old record replaced',
+  '304': 'Field edit error',
+  '305': 'File locked',
+  '306': 'Processing failure',
+  '307': 'Format error',
+  '308': 'Duplicate processing, new record rejected',
+  '309': 'File unknown',
+  '381': 'Record not found. Account unsettled. Withdrawal not processed',
+  '382': 'Balance record deleted',
+  '383': 'Balance enquiry',
+  '480': 'Reversal accepted',
+  '481': 'Reversal incorrect',
+  '482': 'Transaction already cancelled',
+  '501': 'Reversal amount incorrect',
+  '503': 'Totals not available',
+  '581': 'Reconciliation complete',
+  '582': 'Reconciliation procedure not available',
+  '700': 'Top-ups fully reserved',
+  '701': 'Top-ups partially reserved',
+  '702': 'Top-ups not reserved',
+  '750': 'Message or ECR request not authorised by centre',
+  '800': 'Cut-off in progress',
+  '880': 'Connection not accepted',
+  '902': 'Invalid transaction',
+  '908': 'Transaction recipient not referenced for routing',
+  '909': 'System failure',
+  '911': 'Issuer did not respond in time',
+  '912': 'Card issuer unavailable',
+  '992': 'Issuer not found',
+  '993': 'PIN verification impossible',
+  '994': 'Transaction processing error',
+  '995': 'Server processing error',
+};
+
+/**
+ * Human-readable description of a CR (013) response code,
+ * or a fallback string when the code is unknown (§6).
+ */
+export function describeResponseCode(cr?: string): string {
+  if (cr !== undefined && RESPONSE_CODES[cr] !== undefined) {
+    return RESPONSE_CODES[cr];
+  }
+  return `Unknown response code: ${cr ?? '(none)'}`;
+}
+
+/**
  * Get current date in DDMMYYYY format
  */
 function getCurrentDate(): string {
@@ -72,21 +185,59 @@ export function buildPaymentRequest(
 }
 
 /**
- * Build confirmation request TLV
+ * Optional fields carried by an enriched Payment Confirmation (TM=002) per v2 §4.2.
+ * Thread these from the Phase-1 Payment Response (TM=101) so the terminal can
+ * reinforce its coherence checks against the approved transaction.
+ */
+export interface ConfirmationOptions {
+  /** Amount in centimes (12-digit MT / tag 002). Adds MT + DE when provided. */
+  amountCentimes?: number;
+  /** Masked PAN from the approved response (NCAR / tag 007). */
+  ncar?: string;
+  /** Card expiry YYMM from the approved response (DAEX / tag 017). */
+  daex?: string;
+  /** Currency code for DE / tag 012 (default "504" = MAD). */
+  currency?: string;
+}
+
+/**
+ * Build confirmation request TLV (TM=002).
+ *
+ * v1 callers may pass only (stan, ncai, sequence). v2 callers pass `options`
+ * to carry MT/DE, NCAR and DAEX echoed from the approved Payment Response.
+ * Field order mirrors the reference SDK: TM, NCAI, NS, [MT, DE], STAN, [NCAR], [DAEX], DA, HE.
  */
 export function buildConfirmationRequest(
   stan: string,
   ncai: string,
-  sequence: string
+  sequence: string,
+  options?: ConfirmationOptions
 ): string {
-  return (
+  const currency = options?.currency ?? CURRENCY.MAD;
+
+  let msg =
     buildField(TLV_TAGS.TM, MESSAGE_TYPES.CONFIRMATION_REQUEST) +
-    buildField(TLV_TAGS.STAN, stan) +
     buildField(TLV_TAGS.NCAI, ncai) +
-    buildField(TLV_TAGS.NS, sequence) +
-    buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime())
-  );
+    buildField(TLV_TAGS.NS, sequence);
+
+  if (options?.amountCentimes !== undefined) {
+    msg +=
+      buildField(TLV_TAGS.MT, options.amountCentimes.toString()) +
+      buildField(TLV_TAGS.DE, currency);
+  }
+
+  msg += buildField(TLV_TAGS.STAN, stan);
+
+  if (options?.ncar) {
+    msg += buildField(TLV_TAGS.NCAR, options.ncar);
+  }
+  if (options?.daex) {
+    msg += buildField(TLV_TAGS.DAEX, options.daex);
+  }
+
+  msg += buildField(TLV_TAGS.DA, getCurrentDate()) + buildField(TLV_TAGS.HE, getCurrentTime());
+
+  return msg;
 }
 
 /**
@@ -238,14 +389,21 @@ export function maskCardNumbersInText(text: string): string {
  */
 export function parseTlv(tlvString: string): Record<string, string> {
   const fields: Record<string, string> = {};
+
+  // Stop at the first end-of-message terminator ('!' v2, '?' v1) so any receipt
+  // content or noise after it is ignored. Both are accepted so the parser stays
+  // protocol-version agnostic even if the native layer did not strip them.
+  const termIndex = tlvString.search(/[!?]/);
+  const data = termIndex >= 0 ? tlvString.slice(0, termIndex) : tlvString;
+
   let index = 0;
 
-  while (index < tlvString.length) {
+  while (index < data.length) {
     // Need at least 6 chars for tag + length
-    if (index + 6 > tlvString.length) break;
+    if (index + 6 > data.length) break;
 
-    const tag = tlvString.substring(index, index + 3);
-    const lengthStr = tlvString.substring(index + 3, index + 6);
+    const tag = data.substring(index, index + 3);
+    const lengthStr = data.substring(index + 3, index + 6);
 
     // Both tag and length must be 3-digit numeric strings
     if (!/^\d{3}$/.test(tag) || !/^\d{3}$/.test(lengthStr)) break;
@@ -253,9 +411,9 @@ export function parseTlv(tlvString: string): Record<string, string> {
     const length = parseInt(lengthStr, 10);
 
     // Check if we have enough data for the value
-    if (index + 6 + length > tlvString.length) break;
+    if (index + 6 + length > data.length) break;
 
-    let value = tlvString.substring(index + 6, index + 6 + length);
+    let value = data.substring(index + 6, index + 6 + length);
 
     // SECURITY: Immediately mask PAN in tag 007 (NCAR)
     if (tag === TLV_TAGS.NCAR) {

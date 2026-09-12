@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-12
+
+### Added
+- **NAPS TLV v2 protocol support.**
+- Enriched Payment Confirmation (TM=002, spec §4.2): `buildConfirmationRequest(stan, ncai, sequence, options?)` now accepts an optional `ConfirmationOptions` ({ amountCentimes, ncar, daex, currency }) and emits MT/DE, NCAR and DAEX in the reference field order (TM, NCAI, NS, [MT, DE], STAN, [NCAR], [DAEX], DA, HE). Old three-argument callers keep working unchanged.
+- `processPayment` now threads the amount (MT/DE), masked PAN (NCAR) and card expiry (DAEX) from the approved Phase‑1 response (TM=101) into the Phase‑2 confirmation.
+- `protocolVersion` option on `NapsConfig` (new `ProtocolVersion` enum, `v1`/`v2`), defaulting to `V2`. Selects the expected response terminator (`!` = v2, `?` = v1); the native transport already accepts either.
+- `describeResponseCode(cr)` and `isApproved(cr)` helpers plus the `RESPONSE_CODES` / `APPROVED_CODES` tables covering the v2 §6 response codes. Failed payment results now carry the human‑readable §6 description.
+- Unit tests (`test-protocol-v2.test.js`, run via `npm test` with Node's built-in test runner) covering the enriched confirmation, both terminators, and the response-code helpers.
+
+### Changed
+- `parseTlv` now explicitly stops at the first `!` or `?` terminator, ignoring any trailing content.
+- Fixed `tsconfig.json` `moduleResolution` (`bundler` → `node10`) so the CommonJS build compiles under TypeScript 5.9.
+
 ## [1.1.0] - 2026-07-22
 
 ### Added

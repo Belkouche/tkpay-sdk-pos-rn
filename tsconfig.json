@@ -10,7 +10,7 @@
     "jsx": "react",
     "lib": ["ES2020", "DOM"],
     "module": "CommonJS",
-    "moduleResolution": "bundler",
+    "moduleResolution": "node10",
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "resolveJsonModule": true,

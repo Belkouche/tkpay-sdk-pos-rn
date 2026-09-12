@@ -3,6 +3,21 @@
  */
 
 /**
+ * NAPS M2M protocol version.
+ *
+ * - `V2` (default): responses terminated by '!'. Payment confirmations (TM=002)
+ *   carry the enriched §4.2 fields (MT/DE, NCAR, DAEX) echoed from the response.
+ * - `V1`: responses terminated by '?'.
+ *
+ * The native transport already accepts either terminator; this flag documents
+ * the intended contract and defaults the SDK to v2 (TCP/Sunmi terminals).
+ */
+export enum ProtocolVersion {
+  V1 = 'v1',
+  V2 = 'v2',
+}
+
+/**
  * SDK Configuration
  */
 export interface NapsConfig {
@@ -14,6 +29,8 @@ export interface NapsConfig {
   timeout?: number;
   /** Confirmation timeout in milliseconds (default: 40000) */
   confirmationTimeout?: number;
+  /** NAPS M2M protocol version (default: ProtocolVersion.V2) */
+  protocolVersion?: ProtocolVersion;
 }
 
 /**
