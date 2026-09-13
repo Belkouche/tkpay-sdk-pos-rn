@@ -1,5 +1,13 @@
 # react-native-tkpay-naps
 
+> Part of the NAPS SDK family — all speak the same M2M TLV protocol to the same terminals.
+> The **[C# SDK](https://github.com/Belkouche/tkpay-sdk-pos-naps-csharp) is canonical**
+> (reference implementation); this is the React Native port. Siblings:
+> [Node.js](https://github.com/Belkouche/aslan-naps-node) ·
+> [Android](https://github.com/Belkouche/tkpay-sdk-pos-android) ·
+> [iOS](https://github.com/Belkouche/tkpay-sdk-pos-ios).
+> Test without hardware using the [emulator](https://github.com/Belkouche/tkpay-naps-emulator).
+
 React Native SDK for integrating **NAPS Pay POS terminals** into your mobile application.
 
 Implements the full **NAPS M2M TLV protocol** — the same binary protocol used by physical SUNMI terminals in production. Works on iOS and Android. Full TypeScript support.
