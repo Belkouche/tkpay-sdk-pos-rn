@@ -445,7 +445,7 @@ The [NAPS emulator](https://github.com/Belkouche/tkpay-naps-emulator) is a Pytho
 terminal that speaks the same protocol. Start it:
 
 ```bash
-python3 /Users/belkouche/Projects/tkpay/tkpay-naps-emulator/naps_emulator.py --port 4444
+python3 ../tkpay-naps-emulator/naps_emulator.py --port 4444
 ```
 
 Useful `--mode` values:
@@ -485,7 +485,7 @@ npm run typecheck
 npm test                                        # build + unit tests (no emulator)
 
 # integration tests: start the emulator in a mode, run the matching tests
-python3 /Users/belkouche/Projects/tkpay/tkpay-naps-emulator/naps_emulator.py --port 4444 --mode void_995
+python3 ../tkpay-naps-emulator/naps_emulator.py --port 4444 --mode void_995
 NAPS_EMULATOR_MODE=void_995 npm run test:integration
 ```
 
