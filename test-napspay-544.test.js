@@ -46,6 +46,7 @@ const {
   TIDE,
   ReceiptType,
   describeResponseCode,
+  parseReceipt,
 } = require('./lib');
 
 /** Decode a TLV string into an ordered list of {tag, value} entries. */
@@ -301,4 +302,22 @@ test('response-code table covers the full NapsPay ISO list', () => {
   }
   assert.equal(describeResponseCode('481'), 'Reversal amount incorrect');
   assert.equal(describeResponseCode('581'), 'Reconciliation already done');
+});
+
+test('parseReceipt reads every line of a spec §5 DP block (groups separated by "*", last ends "?")', () => {
+  const line = (n, fmt, align, text) =>
+    buildField('030', n) + buildField('031', fmt) + buildField('032', align) + buildField('033', text);
+  const dpValue =
+    line('01', 'S', 'G', 'CENTRE MONETIQUE INTERBANCAIRE ') + '*' +
+    line('02', 'S', 'G', '09/05/11 08:12:55 ') + '*' +
+    line('03', 'G', 'C', 'Montant: 25040.00 MAD ') + '*' +
+    line('04', 'S', 'G', 'CARTE 516794******3315') + '*' +
+    line('05', 'S', 'G', 'TICKET A CONSERVER') + '?';
+  const receipt = parseReceipt(dpValue, ReceiptType.CUSTOMER);
+
+  assert.deepEqual(receipt.lines.map((l) => l.lineNumber), ['01', '02', '03', '04', '05']);
+  assert.equal(receipt.lines[3].text, 'CARTE 516794******3315', '"*" inside a value is kept');
+  assert.equal(receipt.lines[2].bold, true);
+  assert.equal(receipt.lines[2].alignment, 'CENTER');
+  assert.equal(receipt.lines[4].text, 'TICKET A CONSERVER');
 });

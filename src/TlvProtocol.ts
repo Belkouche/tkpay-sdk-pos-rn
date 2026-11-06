@@ -469,6 +469,10 @@ export function parseTlv(tlvString: string): Record<string, string> {
 
 /**
  * Parse receipt data from DP tag value
+ *
+ * Print lines are groups of sub-tags (030-033) separated by '*'; the last
+ * group may end with '?' (spec §5). Values are length-delimited, so a '*'
+ * inside a line (e.g. a masked PAN) is kept.
  */
 export function parseReceipt(dpValue: string, type: ReceiptType): Receipt {
   const lines: ReceiptLine[] = [];
@@ -479,6 +483,12 @@ export function parseReceipt(dpValue: string, type: ReceiptType): Receipt {
   let content = '';
 
   while (index < dpValue.length) {
+    // Skip the line separator '*' and the end-of-lines marker '?' between groups
+    if (dpValue[index] === '*' || dpValue[index] === '?') {
+      index++;
+      continue;
+    }
+
     if (index + 6 > dpValue.length) break;
 
     const tag = dpValue.substring(index, index + 3);
