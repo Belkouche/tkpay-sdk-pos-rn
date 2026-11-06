@@ -10,12 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.4.4 emulator (two-phase void, `confirm_error` mode).
 
 ### Fixed
+- **Receipts parsed to their first line only.** `parseReceipt` now skips the `*` separator between print lines and the final `?` marker of a DP block (spec §5), so every line is returned. A `*` inside a line's text (e.g. a masked PAN) is kept.
 - **Refused payment confirmation reported as approved.** A TM=102 with CR ≠ 000 (e.g. 302 sale not found, 482 already cancelled — the terminal auto-reverses) now yields a failed `PaymentResult` with the decline receipt instead of `success: true`.
 
 ### Added
 - `CancellationResult.merchantReceipt` (DP of TM=103) and `CancellationResult.customerReceipt` (DP of TM=104).
 - `MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE` (`'104'`); `CANCELLATION_CORRECTION` is kept as a deprecated alias.
 - Response codes 265, 281, 385, 400, 500 and 888 from the NapsPay ISO table.
+- Runnable Node quickstart `example/quickstart/quickstart.js` (same code as the README quickstart) and `example/quickstart/nodeTransport.js`, a Node TCP stand-in for the native module.
 - Emulator integration tests `test-integration.test.js`, selected by mode: `NAPS_PORT=4456 NAPS_EMULATOR_MODE=<mode> npm run test:integration` against `naps_emulator.py --port 4456 --mode <mode>`. Covers approve, decline, confirm_error, void_480, void_995, void_no_confirm and void_refuse.
 
 ### Changed

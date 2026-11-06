@@ -1,6 +1,6 @@
 # react-native-tkpay-naps
 
-> Part of the NAPS SDK family — all speak the same M2M TLV protocol to the same terminals.
+> Part of the NAPS SDK family. All of them speak the same M2M TLV protocol to the same terminals.
 > The **[C# SDK](https://github.com/Belkouche/tkpay-sdk-pos-naps-csharp) is canonical**
 > (reference implementation); this is the React Native port. Siblings:
 > [Node.js](https://github.com/Belkouche/aslan-naps-node) ·
@@ -8,70 +8,53 @@
 > [iOS](https://github.com/Belkouche/tkpay-sdk-pos-ios).
 > Test without hardware using the [emulator](https://github.com/Belkouche/tkpay-naps-emulator).
 
-React Native SDK for integrating **NAPS Pay POS terminals** into your mobile application.
+React Native SDK that lets a cash-register app (the "ECR") take card payments on a NAPS Pay
+payment terminal. Your app sends the amount, the customer pays on the terminal, and the SDK
+returns the result: approval or decline, STAN, masked card number and printable receipts.
+It also voids payments and runs the terminal's maintenance operations.
 
-Implements the full **NAPS M2M TLV protocol** — the same binary protocol used by physical SUNMI terminals in production. Works on iOS and Android. Full TypeScript support.
+It implements the NapsPay ECR TLV protocol v2.0 as run by NapsPay v5.4.4, on iOS and Android, with TypeScript types.
 
-Targets **NapsPay v5.4.4** (TLV v2, `!` terminator), tracking the canonical C# SDK.
+## Contents
 
-[![npm version](https://img.shields.io/badge/version-1.5.0-blue)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
-[![platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
-
----
-
-## Table of Contents
-
-1. [How it works](#how-it-works)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [API Reference](#api-reference)
-   - [processPayment](#processpayment)
-   - [cancelPayment](#cancelpayment)
-   - [networkTest](#networktest)
-   - [printDuplicate](#printduplicate)
-   - [resetPinPad](#resetpinpad)
-   - [referencing](#referencing)
-   - [totals](#totals)
-   - [settlement](#settlement)
-   - [testConnection](#testconnection)
-5. [Receipts](#receipts)
-6. [Error Handling](#error-handling)
-7. [Response Codes](#response-codes)
-8. [Full Example App](#full-example-app)
-9. [Permissions](#permissions)
-10. [Troubleshooting](#troubleshooting)
+1. [Supported terminals and connections](#supported-terminals-and-connections)
+2. [Install](#install)
+3. [Quickstart](#quickstart)
+4. [How a payment works](#how-a-payment-works)
+5. [How a void works](#how-a-void-works)
+6. [Other operations](#other-operations)
+7. [Receipts](#receipts)
+8. [Card number masking](#card-number-masking)
+9. [Response codes](#response-codes)
+10. [Errors and timeouts](#errors-and-timeouts)
+11. [Transaction notifications](#transaction-notifications)
+12. [Testing with the emulator](#testing-with-the-emulator)
+13. [Troubleshooting](#troubleshooting)
+14. [Changelog](#changelog)
 
 ---
 
-## How it works
+## Supported terminals and connections
 
-The NAPS terminal speaks a **two-phase TCP protocol** on port 4444. Your app connects over WiFi or LAN and exchanges TLV (Tag-Length-Value) messages.
+The SDK connects to the terminal over **TCP/IP (Wi‑Fi), port 4444**. The NapsPay app on the
+terminal listens on that port; your phone or tablet must be on the same network.
 
-```
-Your App                       SDK                        Terminal (port 4444)
-   │                            │                               │
-   │  processPayment(100 MAD)   │                               │
-   │──────────────────────────> │                               │
-   │                            │── Phase 1: TM=001 ──────────>│
-   │                            │   (amount, cashier info)      │
-   │                            │                    [customer taps card]
-   │                            │<─ TM=101 (RC=000, STAN) ─────│
-   │                            │── Phase 2: TM=002 ──────────>│  ← same TCP connection
-   │                            │<─ TM=102 (receipt) ──────────│
-   │<── PaymentResult ──────────│                               │
-   │    { success, stan,        │                               │
-   │      maskedCard, receipt } │                               │
-```
+| Terminal (spec §2) | Connections the terminal offers | Supported by this SDK |
+|---|---|---|
+| Sunmi P2 | Wi‑Fi TCP 4444, USB | Wi‑Fi TCP |
+| Sunmi P3 | Wi‑Fi TCP 4444, USB | Wi‑Fi TCP |
+| Sunmi P2 Smart PAD | Wi‑Fi TCP 4444, USB | Wi‑Fi TCP |
+| Ingenico Self 5000 | USB only | No |
+| Ingenico Lane 3600 | USB only | No |
 
-**Phase 1** asks the terminal to collect the card. The customer taps or inserts their card. The terminal returns a response code and a STAN (System Trace Audit Number).
+USB is not implemented in this SDK. For a USB link (including the Ingenico terminals), use
+the [C# SDK](https://github.com/Belkouche/tkpay-sdk-pos-naps-csharp), which has a USB serial transport.
 
-**Phase 2** confirms the transaction on the **same TCP connection**. The terminal prints the receipt and considers the transaction complete.
-
-> **Important:** Phase 2 must be sent within **40 seconds** of Phase 1, on the same open socket. The SDK handles this automatically.
+Requirements: React Native 0.60+, iOS 12.0+, Android with the `INTERNET` permission.
 
 ---
 
-## Installation
+## Install
 
 ```bash
 npm install github:Belkouche/tkpay-sdk-pos-rn
@@ -79,674 +62,472 @@ npm install github:Belkouche/tkpay-sdk-pos-rn
 yarn add github:Belkouche/tkpay-sdk-pos-rn
 ```
 
-### iOS
+**iOS**
 
 ```bash
 cd ios && pod install
 ```
 
-### Android
+On iOS 14+, talking to a device on the local network shows the system's local-network
+permission prompt. Add an `NSLocalNetworkUsageDescription` string to `Info.plist`.
 
-No extra steps — the native module auto-links.
+**Android**: the native module auto-links. Make sure `AndroidManifest.xml` has:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+```
+
+Rebuild the app after installing. Native code means Expo Go will not work; use a development build.
 
 ---
 
-## Quick Start
+## Quickstart
 
-### Step 1 — Import and configure
-
-```typescript
-import { NapsPayClient, NapsError, ErrorCode } from 'react-native-tkpay-naps';
-
-// Create one client per terminal. Reuse it across your app.
-const client = new NapsPayClient({
-  host: '192.168.1.100', // Terminal IP on your local network
-  port: 4444,            // Default NAPS M2M port
-});
-```
-
-### Step 2 — First run: referencing
-
-Before the very first payment, call `referencing()` once. This downloads the merchant configuration (MID, TID, currency) from the NAPS server.
+Connect, pay 10.50 MAD, check the result, print the customer receipt:
 
 ```typescript
-const ref = await client.referencing('01', '00001');
-if (!ref.success) {
-  console.error('Referencing failed:', ref.error);
-  return;
+import { NapsPayClient, receiptToPlainText } from 'react-native-tkpay-naps';
+
+const client = new NapsPayClient({ host: '127.0.0.1', port: 4444 }); // terminal IP; 127.0.0.1 = emulator
+
+async function main() {
+  const result = await client.processPayment({ amount: 10.5, registerId: '01', cashierId: '00001' });
+
+  if (result.success) {
+    console.log(`Approved: STAN ${result.stan}, card ${result.maskedCardNumber}`);
+    if (result.customerReceipt) console.log(receiptToPlainText(result.customerReceipt));
+  } else {
+    console.log(`Declined: CR ${result.responseCode} (${result.error})`);
+  }
 }
-// Terminal is now configured. You only need to do this once per session.
+
+main().catch((e) => console.error(`Payment error: ${e.code} ${e.message}`));
 ```
 
-### Step 3 — Process a payment
+- `host` is the terminal's IP address (shown in the terminal's network settings). Use `127.0.0.1` with the emulator.
+- `registerId` (2 digits) and `cashierId` (5 digits) identify your till; together they form the NCAI field.
+- On a real terminal, run [`referencing()`](#referencing) once before the first payment.
 
-```typescript
-const result = await client.processPayment({
-  amount: 150.00,      // MAD — decimals are fine (150.00, 89.50, etc.)
-  registerId: '01',   // 2-digit register/POS ID
-  cashierId: '00001', // 5-digit cashier ID
-});
-
-if (result.success) {
-  console.log('Approved! STAN:', result.stan);
-  console.log('Card:', result.maskedCardNumber); // e.g. 516794******3315
-} else {
-  console.log('Declined:', result.error);
-}
-```
-
-That's it. The SDK handles Phase 1, waits for the customer to tap, sends Phase 2, and returns the result.
+The same code runs under Node against the emulator. See [`example/quickstart/quickstart.js`](example/quickstart/quickstart.js) and [Testing with the emulator](#testing-with-the-emulator).
 
 ---
 
-## API Reference
+## How a payment works
 
-### `NapsPayClient(config)`
+A payment is **two request/response exchanges on the same TCP connection**. `processPayment()`
+does both for you.
 
-```typescript
-const client = new NapsPayClient({
-  host: string,                 // Required — terminal IP address
-  port?: number,                // Default: 4444
-  timeout?: number,             // Default: 120000 ms (2 min) — time to wait for card tap
-  confirmationTimeout?: number, // Default: 40000 ms — Phase 2 window
-  protocolVersion?: ProtocolVersion, // Default: ProtocolVersion.V2
-});
+```mermaid
+sequenceDiagram
+    participant App as Your app (SDK)
+    participant T as Terminal
+    App->>T: TM 001 Payment request (amount, NCAI, sequence)
+    Note over T: Customer taps / inserts card
+    T-->>App: TM 101 Payment response (CR, STAN, masked PAN, merchant receipt)
+    App->>T: TM 002 Confirmation (same connection, same sequence, echoes amount + PAN)
+    T-->>App: TM 102 Confirmation response (CR, customer receipt)
+    Note over App,T: Connection closed
 ```
 
-**`protocolVersion`** selects the NAPS M2M protocol contract:
+1. **TM 001 → 101.** The SDK sends the amount (in centimes), NCAI, sequence number, currency
+   (504 = MAD) and the date/time, then waits up to `timeout` (default 120 s) while the customer
+   pays. CR `000` in TM 101 means the card was authorised.
+2. **TM 002 → 102.** On the same connection, the SDK confirms the transaction, echoing the amount,
+   masked PAN and card expiry from TM 101. It waits up to `confirmationTimeout` (default 40 s).
+   CR `000` in TM 102 completes the payment.
 
-- `ProtocolVersion.V2` (default) — responses terminated by `!`. The Phase‑2 payment
-  confirmation (TM=002) is enriched per §4.2: it echoes the amount (MT/DE), masked
-  PAN (NCAR) and card expiry (DAEX) from the approved response so the terminal can
-  reinforce its coherence checks.
-- `ProtocolVersion.V1` — responses terminated by `?`.
+`result.success` is `true` only if **both** responses return CR `000`. A decline in TM 101 skips
+the confirmation. If the terminal refuses the confirmation (TM 102 with CR ≠ 000, for example
+`482` when it has auto-reversed), the result is a failure too.
 
-The native transport accepts either terminator, so the flag documents the intended
-contract; these SDKs are TCP/Sunmi only and default to v2.
-
----
-
-### `processPayment`
-
-**The main method.** Runs the full two-phase payment flow.
-
-```typescript
-const result = await client.processPayment({
-  amount: number,      // Amount in MAD (e.g. 100, 89.50)
-  registerId: string,  // 2 digits, e.g. '01'
-  cashierId: string,   // 5 digits, e.g. '00001'
-  sequence?: string,   // 6 digits — auto-generated if omitted
-});
-```
-
-**Returns `PaymentResult`:**
+**`PaymentResult`**
 
 ```typescript
 {
-  success: boolean,
-  responseCode: string,       // '000' = approved
-  stan?: string,              // System Trace Audit Number — save this for cancellation
-  maskedCardNumber?: string,  // e.g. '516794******3315'
-  cardExpiry?: string,        // 'YYMM'
-  authNumber?: string,        // Authorization number
-  entryMode?: string,         // 'CTLS' (contactless), 'ICC' (chip), 'SWIPE'
-  transactionDate?: string,   // 'DDMMYYYY'
-  transactionTime?: string,   // 'HHMMSS'
-  merchantReceipt?: Receipt,
-  customerReceipt?: Receipt,
-  error?: string,             // Human-readable error if success=false
+  success: boolean,          // true only when TM 101 and TM 102 both returned CR 000
+  responseCode: string,      // CR of the failing step, or "000"
+  stan?: string,             // System Trace Audit Number: keep it to void the payment
+  maskedCardNumber?: string, // e.g. "516794******3315"
+  cardExpiry?: string,       // YYMM
+  cardholderName?: string,
+  entryMode?: string,
+  authNumber?: string,
+  ncai?: string,
+  sequence?: string,         // keep it to void the payment
+  transactionDate?: string,  // DDMMYYYY
+  transactionTime?: string,  // HHMMSS
+  merchantReceipt?: Receipt, // from TM 101 (or the decline receipt)
+  customerReceipt?: Receipt, // from TM 102
+  error?: string,            // human-readable reason when success is false
 }
 ```
 
+The `sequence` is generated by the client (000001, 000002, …) unless you pass `sequence` in the request.
+
 ---
 
-### `cancelPayment`
+## How a void works
 
-Voids a previously approved transaction by its STAN. Must be called **before end-of-day settlement**.
+A void (cancellation) of an approved payment is also **two exchanges on one connection**.
+`cancelPayment()` does both.
 
-```typescript
-const result = await client.cancelPayment(
-  stan,        // STAN from the PaymentResult you want to cancel
-  registerId,  // Same register ID used for the original payment
-  cashierId,   // Same cashier ID
-  sequence,    // Same sequence number
-  amountCentimes, // Original amount in centimes — required by NapsPay v5.4.4+
-);
+```mermaid
+sequenceDiagram
+    participant App as Your app (SDK)
+    participant T as Terminal
+    App->>T: TM 003 Cancellation (STAN of the sale, amount)
+    T-->>App: TM 103 (CR 000 = sale found; amount, merchant void receipt)
+    App->>T: TM 004 Cancellation confirmation (same connection, same sequence, echoes amount)
+    T-->>App: TM 104 (CR 480 or 000 = void done; void STAN, customer receipt)
 ```
 
-> **Note:** Cancellation opens a **new TCP connection** (not the same socket as the original payment) and runs two phases on it: TM=003 → 103 (void performed), then TM=004 → 104 (void STAN + customer copy). TM=104 with CR=480 or 000 means the cancellation completed. If the TM=104 reply times out, or comes back with CR=995, the outcome is unknown: the result is `success: false` with `pendingConfirmation: true` — verify the void by STAN (`printDuplicate`) before treating it as done.
+- **TM 103 with CR 000 only means the sale was found.** The reversal is executed by TM 004.
+- **TM 104 with CR 480 or 000:** the void is done. `success: true`.
+- **TM 104 with CR 995, or no TM 104 within `confirmationTimeout`:** the outcome is unknown.
+  `success: false` and `pendingConfirmation: true`, with the STAN and the TM 103 merchant receipt.
+  **Do not treat this as voided, and do not treat it as failed.** Verify by printing a duplicate
+  receipt for the sale's STAN.
+- **Any other result** (TM 103 refused, e.g. 302 not found or 482 already cancelled, or a TM 104
+  refusal): `success: false`, no `pendingConfirmation`. The payment is not voided.
 
-**Returns `CancellationResult`:**
+```typescript
+import { NapsPayClient, type PaymentResult } from 'react-native-tkpay-naps';
+
+async function voidPayment(client: NapsPayClient, payment: PaymentResult, amount: number) {
+  const result = await client.cancelPayment(
+    payment.stan!,             // STAN of the sale to void
+    '01',                      // same register as the sale
+    '00001',                   // same cashier as the sale
+    payment.sequence!,         // sequence of the sale
+    Math.round(amount * 100),  // sale amount in centimes (required by NapsPay v5.4.4)
+  );
+
+  if (result.success) {
+    console.log(`Voided (CR ${result.responseCode}), void STAN ${result.stan}`);
+    return 'voided';
+  }
+
+  if (result.pendingConfirmation) {
+    // Unknown outcome: reprint the sale's receipt and check it before doing anything else.
+    const dup = await client.printDuplicate('01', '00001', payment.stan);
+    console.log(`Void unconfirmed (${result.error}). Duplicate CR ${dup.responseCode}`);
+    return 'pending';
+  }
+
+  console.log(`Void failed: CR ${result.responseCode} (${result.error})`);
+  return 'failed';
+}
+```
+
+Voids must be done before end-of-day settlement. A void of an already-voided sale returns CR 482.
+
+**`CancellationResult`**
 
 ```typescript
 {
-  success: boolean,
+  success: boolean,              // true for TM 104 CR 480 or 000
   responseCode: string,
-  stan?: string,   // Void STAN from TM=104 (falls back to the TM=103 STAN)
-  merchantReceipt?: Receipt,  // Void receipt, merchant copy (TM=103)
-  customerReceipt?: Receipt,  // Void receipt, customer copy (TM=104)
-  pendingConfirmation?: boolean,  // TM=104 timed out or CR=995 — outcome unknown, verify by STAN
+  stan?: string,                 // void STAN from TM 104, else the TM 103 STAN
+  merchantReceipt?: Receipt,     // void receipt, merchant copy (TM 103)
+  customerReceipt?: Receipt,     // void receipt, customer copy (TM 104)
+  pendingConfirmation?: boolean, // TM 104 CR 995 or no TM 104: outcome unknown
   error?: string,
 }
 ```
 
-**Example flow — pay then cancel:**
-
-```typescript
-// Pay
-const payment = await client.processPayment({ amount: 100, registerId: '01', cashierId: '00001' });
-
-// Cancel it (e.g. customer changed their mind)
-if (payment.success && payment.stan) {
-  const cancel = await client.cancelPayment(payment.stan, '01', '00001', payment.sequence!, 10000);
-  console.log(cancel.success ? 'Cancelled' : 'Cancel failed: ' + cancel.error);
-}
-```
-
 ---
+
+## Other operations
+
+Each one opens a connection, sends one request and returns the parsed answer. They never throw:
+a transport error comes back as `success: false` with `responseCode: ''` and `error` set.
 
 ### `networkTest`
 
-Sends a **TM=009 M2M network test** to the terminal and measures the round-trip time.
-
-Unlike `testConnection()` which only opens a TCP socket, `networkTest()` sends a real protocol message. Use it on your diagnostics screen or before critical operations.
+TM 009. Checks that the terminal answers at protocol level and measures the round trip.
 
 ```typescript
-const test = await client.networkTest('01', '00001');
-
-console.log(test.success);  // true/false
-console.log(test.rttMs);    // e.g. 4 — round-trip in milliseconds
-console.log(test.error);    // set if success=false
+const net = await client.networkTest('01', '00001');
+console.log(net.success ? `Terminal OK in ${net.rttMs} ms` : `Network test failed: ${net.error}`);
 ```
 
-**Returns `NetworkTestResult`:**
+### `referencing`
+
+TM 013. Loads the terminal's parameter set from the server. Run it once before the first payment,
+and again after a terminal swap or configuration change.
 
 ```typescript
-{
-  success: boolean,
-  responseCode: string,
-  rttMs?: number,   // Round-trip time in milliseconds
-  error?: string,
-}
-```
+import { TIDE } from 'react-native-tkpay-naps';
 
----
+const ref = await client.referencing('01', '00001');                    // merchant set ("01")
+const recharge = await client.referencing('01', '00001', TIDE.RECHARGE); // recharge set ("02")
+console.log(ref.success, ref.parameterSet, ref.receipt);
+```
 
 ### `printDuplicate`
 
-Asks the terminal to **reprint the last receipt**. Pass a `stan` to reprint a specific transaction.
+TM 008. Reprints a receipt: the last transaction, or a given STAN.
 
 ```typescript
-// Reprint last transaction
-const dup = await client.printDuplicate('01', '00001');
-
-// Reprint a specific transaction
-const dup = await client.printDuplicate('01', '00001', '635279');
-
-if (dup.success && dup.merchantReceipt) {
-  const text = receiptToPlainText(dup.merchantReceipt);
-  console.log(text);
-}
+const last = await client.printDuplicate('01', '00001');
+const sale = await client.printDuplicate('01', '00001', '000042');
+if (sale.success && sale.merchantReceipt) console.log(receiptToPlainText(sale.merchantReceipt));
 ```
 
-**Returns `DuplicateReceiptResult`:**
+### `totals`
+
+TM 010 with a sequence number. Reads the terminal's running batch totals.
 
 ```typescript
-{
-  success: boolean,
-  responseCode: string,
-  merchantReceipt?: Receipt,
-  error?: string,
-}
+const tot = await client.totals('01', '00001');
+if (tot.success && tot.receipt) console.log(receiptToPlainText(tot.receipt));
 ```
 
----
+### `settlement`
+
+TM 010. End-of-day settlement (télécollecte). The terminal must be idle and referenced.
+
+```typescript
+const settle = await client.settlement('01', '00001');
+console.log(settle.success ? `Settled ${settle.date} ${settle.time}` : settle.error);
+```
 
 ### `resetPinPad`
 
-Sends **TM=012** to reset the terminal to idle state ("Attente Caisse").
-
-Use this if the terminal is stuck on a card-waiting screen after a network error or app crash.
+TM 012. Brings the terminal back to its idle "Attente Caisse" screen.
 
 ```typescript
 const reset = await client.resetPinPad('01', '00001');
 console.log(reset.success ? 'Terminal reset' : reset.error);
 ```
 
-**Returns `ResetResult`:**
-
-```typescript
-{
-  success: boolean,
-  responseCode: string,
-  error?: string,
-}
-```
-
----
-
-### `referencing`
-
-Sends **TM=013** to sync merchant configuration from the NAPS server.
-
-**When to call it:**
-- Once at app startup (before the first payment of the day)
-- After a terminal swap or configuration change
-- When the terminal reports configuration errors
-
-The optional third argument selects the parameter set (TIDE, tag 020): `TIDE.MERCHANT` (`"01"`, default) or `TIDE.RECHARGE` (`"02"`).
-
-```typescript
-const ref = await client.referencing('01', '00001');            // merchant set
-// await client.referencing('01', '00001', TIDE.RECHARGE);     // recharge set
-
-if (ref.success) {
-  console.log('Terminal configured');
-  // ref.receipt contains MID, TID, currency info
-}
-```
-
-**Returns `ReferencingResult`:**
-
-```typescript
-{
-  success: boolean,
-  responseCode: string,
-  parameterSet?: string,  // "01" merchant, "02" recharge
-  receipt?: Receipt,  // Contains MID, TID, merchant name, currency
-  error?: string,
-}
-```
-
----
-
-### `totals`
-
-Sends **TM=010** with a sequence number to read the terminal's running batch totals.
-
-```typescript
-const tot = await client.totals('01', '00001');
-
-if (tot.success) {
-  // tot.receipt contains the totals report
-}
-```
-
-**Returns `TotalsResult`:** `{ success, responseCode, receipt?, error? }`
-
----
-
-### `settlement`
-
-Sends **TM=010** to trigger end-of-day telecollecte (batch settlement).
-
-```typescript
-const settle = await client.settlement('01', '00001');
-
-if (settle.success) {
-  console.log('Settlement complete');
-  // settle.receipt contains daily totals
-}
-```
-
-**Returns `SettlementResult`:**
-
-```typescript
-{
-  success: boolean,
-  responseCode: string,
-  date?: string,
-  time?: string,
-  receipt?: Receipt,
-  error?: string,
-}
-```
-
----
-
 ### `testConnection`
 
-TCP-level connectivity check (no protocol message). Quick way to know if the terminal IP is reachable.
+TCP only: opens and closes a socket (5 s timeout), no protocol message. Prefer `networkTest()`.
 
 ```typescript
 const reachable = await client.testConnection();
-// true = port 4444 is open, false = unreachable
 ```
-
-> For a full protocol-level health check, use `networkTest()` instead.
 
 ---
 
 ## Receipts
 
-The terminal returns receipts as structured objects. Use `receiptToPlainText()` to render them, or iterate `lines` for custom UI.
+The terminal sends receipts in the DP field (tag 010) as numbered lines with a format
+(normal or bold) and an alignment, separated by `*` (spec §5). The SDK parses them into `Receipt` objects:
 
 ```typescript
-import { receiptToPlainText, Alignment } from 'react-native-tkpay-naps';
-
-// Plain text (for logging or monospace display)
-const text = receiptToPlainText(result.merchantReceipt!, 40);
-console.log(text);
-
-// Custom rendering
-result.merchantReceipt!.lines.forEach(line => {
-  console.log({
-    text: line.text,
-    bold: line.bold,                    // true = gras
-    alignment: line.alignment,          // Alignment.LEFT | CENTER | RIGHT
-  });
-});
+interface Receipt {
+  type: ReceiptType;           // MERCHANT or CUSTOMER
+  lines: ReceiptLine[];        // { lineNumber, text, bold, alignment: LEFT | CENTER | RIGHT }
+}
 ```
 
-**Receipt types:**
+`receiptToPlainText(receipt, width = 40)` renders one as text, with centring and right
+alignment applied, ready for a printer or a log.
 
-- `result.merchantReceipt` — copy for the merchant (kept in register)
-- `result.customerReceipt` — copy for the customer (printed and handed over)
+What the SDK changes in receipts:
+- The first centred line containing "naps" is replaced by a bold `TKPAY` line followed by `Powered by NAPS`.
+- On an approved payment, `STAN:`, `NCAI:` and `SEQ:` lines are added to the merchant receipt
+  (after the authorisation-code line).
+- Any 16-digit number in a line is masked (see below).
+
+Where receipts come from: payment merchant copy = TM 101, customer copy = TM 102. Void merchant
+copy = TM 103, customer copy = TM 104. Declined payments return the decline receipt as `merchantReceipt`.
 
 ---
 
-## Error Handling
+## Card number masking
 
-The SDK throws `NapsError` for protocol-level failures. Payment declines are **not** errors — they come back as `result.success = false` with a `responseCode`.
+The card number (NCAR, tag 007) is masked to **first 6 + last 4 digits** as soon as a response is
+parsed (`516794******3315`). The full PAN is never returned by the SDK. Receipt text goes through
+the same masking for any 16-digit number. Both helpers are exported:
+
+```typescript
+import { maskCardNumber, maskCardNumbersInText } from 'react-native-tkpay-naps';
+
+maskCardNumber('5167940123453315');                // "516794******3315"
+maskCardNumbersInText('CARTE 5167940123453315');   // "CARTE 516794******3315"
+```
+
+---
+
+## Response codes
+
+Every response carries a CR (tag 013). `000` means success. The full table (spec §6 and the
+NapsPay ISO list) is exported as `RESPONSE_CODES`, with helpers:
+
+```typescript
+import { describeResponseCode, isApproved, RESPONSE_CODES } from 'react-native-tkpay-naps';
+
+describeResponseCode('116');   // "Insufficient funds"
+describeResponseCode('482');   // "Transaction already cancelled"
+isApproved('001');             // true: 000, 001, 003 and 007 are approval codes
+```
+
+`processPayment()` itself treats only `000` as success. Failed payments put
+`describeResponseCode()`'s text in `result.error`, with a few specific messages (909 "Terminal or
+server is down", 302 "Transaction not found", 482 "Transaction already cancelled", 480 "Transaction cancelled").
+
+Codes you will meet most often:
+
+| CR | Meaning |
+|---|---|
+| 000 | Approved / OK |
+| 100 | Do not honour (declined) |
+| 116 | Insufficient funds |
+| 117 | Incorrect PIN |
+| 302 | Record not found (unknown STAN) |
+| 480 | Reversal accepted (void done, in TM 104) |
+| 482 | Transaction already cancelled |
+| 909 | System failure (terminal or server down) |
+| 995 | Server processing error (TM 104: void outcome unknown) |
+
+---
+
+## Errors and timeouts
+
+**Configuration** (`new NapsPayClient(config)`):
+
+| Option | Default | Used for |
+|---|---|---|
+| `host` | (required) | Terminal IP address |
+| `port` | `4444` | Terminal TCP port |
+| `timeout` | `120000` ms | Opening the connection and waiting for the first response (customer paying), and every single-request operation |
+| `confirmationTimeout` | `40000` ms | Waiting for TM 102 / TM 104 on the same connection |
+| `protocolVersion` | `ProtocolVersion.V2` | Expected terminator: `!` (v2, NapsPay v5.4.4) or `?` (v1). The SDK accepts both either way. |
+
+Timeouts under 1000 ms are raised to 1000 ms, with a console warning.
+
+**`processPayment()` throws** a `NapsError` (with `code` from `ErrorCode`) when there is no usable answer:
+
+| `error.code` | When |
+|---|---|
+| `INVALID_RESPONSE` | Request rejected before sending (amount ≤ 0, `registerId` not 2 characters, `cashierId` not 5), or a response without CR or STAN |
+| `TIMEOUT` | The native error message contains "timeout" |
+| `CONNECTION_FAILED` | The native error message contains "connect" or "connection" |
+| `UNKNOWN_ERROR` | Anything else. On Android a read timeout reports "Read timed out" and lands here. |
+
+A **decline is not an exception**: it returns `success: false` with the CR.
+
+**The other methods never throw.** Transport errors come back as `success: false`, `responseCode: ''`
+and the message in `error`. `cancelPayment()` maps a timeout waiting for TM 104 to `pendingConfirmation`.
 
 ```typescript
 import { NapsError, ErrorCode } from 'react-native-tkpay-naps';
 
 try {
-  const result = await client.processPayment({ ... });
-
-  if (result.success) {
-    // Payment approved
-  } else {
-    // Declined by the bank — show result.error to user
-    console.log('Declined:', result.responseCode, result.error);
-  }
-
-} catch (error) {
-  if (error instanceof NapsError) {
-    switch (error.code) {
-      case ErrorCode.CONNECTION_FAILED:
-        // Terminal unreachable — check IP and network
-        break;
-      case ErrorCode.TIMEOUT:
-        // Customer didn't tap within timeout — safe to retry
-        break;
-      case ErrorCode.TERMINAL_DOWN:
-        // RC=909 — terminal or NAPS server is down
-        break;
-      default:
-        console.error(error.message);
-    }
-  }
+  const result = await client.processPayment({ amount: 25, registerId: '01', cashierId: '00001' });
+  if (!result.success) console.log(`Declined: ${result.error}`);
+} catch (e) {
+  if (e instanceof NapsError && e.code === ErrorCode.TIMEOUT) console.log('No answer from the terminal');
+  else throw e;
 }
 ```
 
-**ErrorCode values:**
+---
 
-| Code | When |
-|------|------|
-| `CONNECTION_FAILED` | Cannot open TCP socket to terminal |
-| `TIMEOUT` | No response within `timeout` ms |
-| `TERMINAL_DOWN` | RC=909 from terminal |
-| `TRANSACTION_NOT_FOUND` | RC=302 |
-| `ALREADY_CANCELLED` | RC=482 |
-| `INVALID_RESPONSE` | Malformed TLV from terminal |
-| `UNKNOWN_ERROR` | Unexpected error |
+## Transaction notifications
+
+After each `processPayment()` (approved or declined), the SDK sends a fire-and-forget `POST` to
+`https://api.tkpay.ma/v1/transactions/notify`. The payload holds the terminal host, amount, CR, STAN,
+authorisation number, **masked** card number, card expiry, entry mode, cardholder name, NCAI,
+register/cashier IDs, sequence, transaction date/time, success flag and error message, plus SDK
+version, platform and a timestamp. It runs after the result is returned, never blocks or changes
+it, and errors are ignored. The URL is fixed in the SDK and cannot be turned off from the API.
+Under Node, the example transport stubs `fetch`, so nothing is sent from emulator runs.
 
 ---
 
-## Response Codes
+## Testing with the emulator
 
-| Code | Meaning |
-|------|---------|
-| `000` | Approved |
-| `100` | Do not honour |
-| `101` | Expired card |
-| `102` | Suspected fraud |
-| `106` | PIN attempts exceeded |
-| `116` | Insufficient funds |
-| `117` | Wrong PIN |
-| `118` | Card not active |
-| `120` | Transaction not allowed at terminal |
-| `121` | Exceeds withdrawal limits |
-| `265` | Please use chip |
-| `280` | Cancelled by cardholder |
-| `281` | PIN verification failed |
-| `302` | Transaction not found |
-| `482` | Already cancelled |
-| `909` | System failure / terminal down |
-| `912` | Card issuer unavailable |
-| `995` | Server processing error |
+The [NAPS emulator](https://github.com/Belkouche/tkpay-naps-emulator) is a Python (standard library)
+terminal that speaks the same protocol. Start it:
 
-For the full v2 §6 table, use the exported helpers:
-
-```typescript
-import { describeResponseCode, isApproved } from 'react-native-tkpay-naps';
-
-describeResponseCode('116'); // "Insufficient funds"
-describeResponseCode('zzz'); // "Unknown response code: zzz"
-isApproved('000');           // true  (approved codes: 000, 001, 003, 007)
-isApproved('100');           // false
+```bash
+python3 /Users/belkouche/Projects/tkpay/tkpay-naps-emulator/naps_emulator.py --port 4444
 ```
 
----
+Useful `--mode` values:
 
-## Full Example App
+| Mode | Behaviour |
+|---|---|
+| `approve` (default) | Approves payments, voids and every operation |
+| `decline` | Declines payments in TM 101 |
+| `error --code 909` | TM 101 returns the given CR (code or scenario name, e.g. `insufficient_funds`) |
+| `confirm_error --code 482` | Approves TM 101, refuses the confirmation TM 102 |
+| `timeout` | Never answers TM 001 (client `timeout`) |
+| `no_confirm` | Never answers TM 002 (40 s confirmation timeout) |
+| `void_refuse --code 302` | TM 103 refuses the void (also `--code 482`) |
+| `void_480` | TM 104 returns CR 480 (void done) |
+| `void_995` | TM 104 returns CR 995 (void pending) |
+| `void_no_confirm` | Never answers TM 004 (void pending) |
+| `interactive` | Asks you to approve or decline each payment |
 
-```tsx
-import React, { useState } from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity,
-  ScrollView, ActivityIndicator, Alert, StyleSheet,
-} from 'react-native';
-import {
-  NapsPayClient,
-  NapsError,
-  receiptToPlainText,
-  type PaymentResult,
-} from 'react-native-tkpay-naps';
+Add `--strict-confirm` to make the emulator check that TM 002 echoes the approved amount and card,
+`--protocol v1` for the old `?` terminator, and `--debug` to print every TLV field.
 
-const REGISTER_ID = '01';
-const CASHIER_ID  = '00001';
+**Run the quickstart against it** (Node, no device needed):
 
-export default function PaymentScreen() {
-  const [host, setHost]     = useState('192.168.1.100');
-  const [amount, setAmount] = useState('100');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult]   = useState<PaymentResult | null>(null);
-  const [log, setLog]         = useState<string[]>([]);
-
-  const addLog = (msg: string) =>
-    setLog(prev => [`${new Date().toLocaleTimeString()} ${msg}`, ...prev]);
-
-  const getClient = () => new NapsPayClient({ host });
-
-  const handleReferencing = async () => {
-    setLoading(true);
-    addLog('Referencing terminal...');
-    const ref = await getClient().referencing(REGISTER_ID, CASHIER_ID);
-    addLog(ref.success ? '✓ Terminal configured' : `✗ ${ref.error}`);
-    setLoading(false);
-  };
-
-  const handleNetworkTest = async () => {
-    setLoading(true);
-    const test = await getClient().networkTest(REGISTER_ID, CASHIER_ID);
-    addLog(test.success
-      ? `✓ Terminal alive (${test.rttMs}ms)`
-      : `✗ Network test failed: ${test.error}`);
-    setLoading(false);
-  };
-
-  const handlePayment = async () => {
-    const amt = parseFloat(amount);
-    if (isNaN(amt) || amt <= 0) {
-      Alert.alert('Error', 'Enter a valid amount');
-      return;
-    }
-    setLoading(true);
-    setResult(null);
-    addLog(`Processing ${amt} MAD...`);
-    try {
-      const r = await getClient().processPayment({
-        amount: amt,
-        registerId: REGISTER_ID,
-        cashierId: CASHIER_ID,
-      });
-      setResult(r);
-      addLog(r.success ? `✓ Approved STAN=${r.stan}` : `✗ Declined RC=${r.responseCode}`);
-    } catch (e) {
-      addLog(`✗ ${e instanceof NapsError ? e.message : 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCancel = async () => {
-    if (!result?.success || !result.stan) {
-      Alert.alert('Nothing to cancel');
-      return;
-    }
-    setLoading(true);
-    addLog(`Cancelling STAN=${result.stan}...`);
-    const cancel = await getClient().cancelPayment(
-      result.stan, REGISTER_ID, CASHIER_ID, result.sequence ?? '000001'
-    );
-    addLog(cancel.success ? '✓ Cancelled' : `✗ ${cancel.error}`);
-    if (cancel.success) setResult(null);
-    setLoading(false);
-  };
-
-  return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>NAPS Pay</Text>
-
-      <Text style={styles.label}>Terminal IP</Text>
-      <TextInput style={styles.input} value={host} onChangeText={setHost} />
-
-      <Text style={styles.label}>Amount (MAD)</Text>
-      <TextInput
-        style={styles.input} value={amount} onChangeText={setAmount}
-        keyboardType="decimal-pad"
-      />
-
-      <View style={styles.row}>
-        <TouchableOpacity style={[styles.btn, styles.secondary]} onPress={handleNetworkTest} disabled={loading}>
-          <Text style={styles.btnText}>Test</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.btn, styles.secondary]} onPress={handleReferencing} disabled={loading}>
-          <Text style={styles.btnText}>Setup</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.btn, styles.primary]} onPress={handlePayment} disabled={loading}>
-          <Text style={styles.btnText}>Pay</Text>
-        </TouchableOpacity>
-      </View>
-
-      {loading && <ActivityIndicator size="large" color="#FF6B35" style={{ marginTop: 20 }} />}
-
-      {result?.success && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>✅ Approved</Text>
-          <Text>STAN: {result.stan}</Text>
-          <Text>Card: {result.maskedCardNumber}</Text>
-          <Text>Auth: {result.authNumber}</Text>
-          {result.merchantReceipt && (
-            <Text style={styles.receipt}>{receiptToPlainText(result.merchantReceipt)}</Text>
-          )}
-          <TouchableOpacity style={[styles.btn, styles.danger, { marginTop: 10 }]} onPress={handleCancel} disabled={loading}>
-            <Text style={styles.btnText}>Cancel this payment</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {result && !result.success && (
-        <View style={[styles.card, styles.declined]}>
-          <Text style={styles.cardTitle}>❌ Declined</Text>
-          <Text>{result.error} (RC={result.responseCode})</Text>
-        </View>
-      )}
-
-      <View style={styles.logBox}>
-        {log.map((l, i) => <Text key={i} style={styles.logLine}>{l}</Text>)}
-      </View>
-    </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: '#f5f5f5', padding: 20 },
-  title:      { fontSize: 28, fontWeight: 'bold', color: '#FF6B35', textAlign: 'center', marginBottom: 24 },
-  label:      { fontSize: 13, color: '#666', marginBottom: 4 },
-  input:      { backgroundColor: '#fff', borderRadius: 8, padding: 12, fontSize: 16, borderWidth: 1, borderColor: '#ddd', marginBottom: 12 },
-  row:        { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  btn:        { flex: 1, padding: 14, borderRadius: 8, alignItems: 'center' },
-  primary:    { backgroundColor: '#FF6B35' },
-  secondary:  { backgroundColor: '#555' },
-  danger:     { backgroundColor: '#d32f2f' },
-  btnText:    { color: '#fff', fontWeight: 'bold', fontSize: 15 },
-  card:       { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginTop: 16, borderLeftWidth: 4, borderLeftColor: '#4CAF50' },
-  declined:   { borderLeftColor: '#d32f2f' },
-  cardTitle:  { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
-  receipt:    { fontFamily: 'monospace', fontSize: 12, marginTop: 10, backgroundColor: '#f9f9f9', padding: 8, borderRadius: 4 },
-  logBox:     { backgroundColor: '#1e1e1e', borderRadius: 8, padding: 12, marginTop: 20, marginBottom: 40 },
-  logLine:    { color: '#adb5bd', fontSize: 12, fontFamily: 'monospace', marginBottom: 2 },
-});
+```bash
+npm install
+npm run build
+node example/quickstart/quickstart.js          # NAPS_PORT=4456 for another port
 ```
 
----
+`example/quickstart/nodeTransport.js` stands in for the native module under Node. In the app, the
+native module does the TCP work. `example/` also contains a full React Native demo app.
 
-## Permissions
+**Run this repo's tests:**
 
-### Android (`AndroidManifest.xml`)
+```bash
+npm run typecheck
+npm test                                        # build + unit tests (no emulator)
 
-```xml
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+# integration tests: start the emulator in a mode, run the matching tests
+python3 /Users/belkouche/Projects/tkpay/tkpay-naps-emulator/naps_emulator.py --port 4444 --mode void_995
+NAPS_EMULATOR_MODE=void_995 npm run test:integration
 ```
 
-### iOS
-
-No additional permissions needed. The app communicates over the local network by default.
+`NAPS_EMULATOR_MODE` is one of `approve`, `decline`, `confirm_error`, `void_480`, `void_995`,
+`void_no_confirm`, `void_refuse`. Tests for other modes are skipped. `NAPS_HOST` / `NAPS_PORT`
+point at a different emulator.
 
 ---
 
 ## Troubleshooting
 
-**Cannot connect to terminal**
-- Terminal and phone must be on the **same WiFi network**
-- Run `networkTest()` to verify connectivity
-- Check that the NAPS Pay app is running on the terminal (it must be in "Attente Caisse" state)
-- Verify the IP address in your network settings
+**`CONNECTION_FAILED` / connection refused**
+- Phone and terminal on the same Wi‑Fi network, and the IP in `host` is the terminal's current IP.
+- The NapsPay app is open on the terminal and idle ("Attente Caisse"). It listens on port 4444.
+- iOS: the local-network permission was granted (Settings → Privacy → Local Network).
+- `networkTest()` confirms the terminal answers at protocol level.
 
-**Payment always times out**
-- The customer has `timeout` milliseconds (default: 2 min) to tap their card
-- If the terminal doesn't respond at all, try `resetPinPad()` then reconnect
+**Payment times out**
+- The customer has `timeout` (120 s by default) to pay. Increase it if needed.
+- If the terminal stays on the card screen, call `resetPinPad()`.
+- On Android a timeout may come back as `UNKNOWN_ERROR` with message "Read timed out" (see [Errors and timeouts](#errors-and-timeouts)).
 
-**"Referencing failed"**
-- The terminal can't reach the NAPS server — check the terminal's mobile/WiFi data connection
-- Try again after a few seconds
+**CR 909: system failure**: the terminal cannot reach the server or is down. Check the terminal's
+own network connection and retry. Run `referencing()` if the terminal was never referenced.
 
-**Terminal stuck on card-waiting screen**
-- Call `resetPinPad()` to bring it back to idle state
-- If that doesn't work, restart the NAPS Pay app on the terminal
+**CR 302: not found**: the STAN does not match a transaction the terminal knows (void or duplicate).
+Check you pass the STAN of the sale.
 
-**Phase 2 confirmation timeout**
-- The SDK auto-sends Phase 2 immediately after Phase 1 — this should not normally happen
-- If it does, increase `confirmationTimeout` (max 40 seconds is the NAPS protocol limit)
+**CR 482: already cancelled**: the sale was already voided (or the terminal auto-reversed it after a
+refused confirmation). Do not void it again.
+
+**Void returned `pendingConfirmation: true`**: TM 104 returned 995 or never arrived. The void may
+or may not have happened. Call `printDuplicate(registerId, cashierId, saleStan)` and check the
+receipt before refunding the customer or retrying. A retry on an already-voided sale returns 482.
+
+**Settlement fails**: the terminal must be idle and referenced. A second settlement on the same day may be refused.
 
 ---
 
-## Requirements
+## Changelog
 
-- React Native 0.60+
-- iOS 12.0+
-- Android API 21+ (Android 5.0)
-
-## Security
-
-- Card numbers (PAN) are **automatically masked** at the SDK layer (first 6 + last 4 digits)
-- Raw TLV data is never logged
-- The SDK never stores sensitive card data
+See [CHANGELOG.md](CHANGELOG.md). The SDK version is in `package.json`.
 
 ## License
 

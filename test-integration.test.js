@@ -9,95 +9,19 @@
  * Modes covered: approve, decline, confirm_error (--code 482), void_480,
  * void_995, void_no_confirm, void_refuse (--code 302 or 482).
  *
- * Runs the compiled client in ./lib. The React Native bridge is replaced by a
- * Node TCP transport with the native semantics: Phase 1 opens the connection,
- * Phase 2 reuses it, responses end at '!'/'?' or after 1 s of silence.
+ * Runs the compiled client in ./lib through example/quickstart/nodeTransport.js,
+ * a Node TCP stand-in for the native module with the same connection semantics.
  */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const net = require('net');
-const Module = require('module');
 
 const HOST = process.env.NAPS_HOST || '127.0.0.1';
 const PORT = parseInt(process.env.NAPS_PORT || '4444', 10);
 const MODE = process.env.NAPS_EMULATOR_MODE || 'approve';
 
-let socket = null;
-const sent = [];
-
-function readFrame(s, timeout) {
-  return new Promise((resolve, reject) => {
-    let buf = '';
-    let silence = null;
-    const done = (value, error) => {
-      clearTimeout(timer);
-      clearTimeout(silence);
-      s.removeAllListeners('data');
-      s.removeAllListeners('error');
-      error ? reject(error) : resolve(value);
-    };
-    const timer = setTimeout(() => done(null, new Error('Timeout waiting for response')), timeout);
-    s.on('data', (chunk) => {
-      buf += chunk.toString('latin1');
-      clearTimeout(silence);
-      const last = buf[buf.length - 1];
-      if (last === '!' || last === '?') return done(buf.slice(0, -1));
-      silence = setTimeout(() => done(buf), 1000);
-    });
-    s.on('error', (e) => done(null, e));
-  });
-}
-
-function closeSocket() {
-  if (socket) socket.destroy();
-  socket = null;
-}
-
-const nodeNative = {
-  async sendPaymentRequest(host, port, tlv, timeout) {
-    closeSocket();
-    socket = net.connect(port, host);
-    await new Promise((resolve, reject) => {
-      socket.once('connect', resolve);
-      socket.once('error', reject);
-    });
-    sent.push(tlv);
-    socket.write(tlv);
-    try {
-      return await readFrame(socket, timeout);
-    } catch (e) {
-      closeSocket();
-      throw e;
-    }
-  },
-  async sendConfirmation(tlv, timeout) {
-    if (!socket) throw new Error('No active connection');
-    if (tlv) {
-      sent.push(tlv);
-      socket.write(tlv);
-    }
-    try {
-      return await readFrame(socket, timeout);
-    } finally {
-      closeSocket();
-    }
-  },
-  async testConnection() {
-    return true;
-  },
-};
-
-const originalLoad = Module._load;
-Module._load = function (request, ...rest) {
-  if (request === 'react-native') {
-    return { NativeModules: { TkpayNaps: nodeNative }, Platform: { OS: 'android' } };
-  }
-  return originalLoad.call(this, request, ...rest);
-};
-// Keep gateway notifications off the network
-global.fetch = async () => ({ ok: true });
-
+// Node TCP stand-in for the native module (also stubs the gateway fetch)
+const { sent, closeSocket } = require('./example/quickstart/nodeTransport');
 const { NapsPayClient, parseTlv } = require('./lib');
 
 const client = new NapsPayClient({ host: HOST, port: PORT });
@@ -106,6 +30,12 @@ const client = new NapsPayClient({ host: HOST, port: PORT });
 // sendConfirmation; a single-shot reply (e.g. a refused TM 103) leaves it open.
 test.afterEach(closeSocket);
 const forModes = (...modes) => ({ skip: !modes.includes(MODE) && `emulator mode is ${MODE}` });
+
+/** A whole receipt was parsed, not just its first line. */
+function assertFullReceipt(receipt, label) {
+  assert.ok(receipt, `${label} present`);
+  assert.ok(receipt.lines.length > 5, `${label}: ${receipt.lines.length} line(s) parsed`);
+}
 
 /** Approved payment to void; returns { stan, sequence }. */
 async function pay(amount = 12.34) {
@@ -124,7 +54,8 @@ async function payThenVoid() {
 test('approve: payment, management ops and two-phase void', forModes('approve'), async () => {
   const payment = await pay();
   assert.match(payment.maskedCardNumber, /^\d{6}\*+\d{4}$/);
-  assert.ok(payment.merchantReceipt && payment.customerReceipt);
+  assertFullReceipt(payment.merchantReceipt, 'payment merchant receipt');
+  assertFullReceipt(payment.customerReceipt, 'payment customer receipt');
 
   for (const op of [
     () => client.networkTest('01', '00001'),
@@ -143,7 +74,8 @@ test('approve: payment, management ops and two-phase void', forModes('approve'),
   assert.equal(result.responseCode, '000');
   assert.equal(result.pendingConfirmation, undefined);
   assert.ok(result.stan);
-  assert.ok(result.merchantReceipt && result.customerReceipt);
+  assertFullReceipt(result.merchantReceipt, 'void merchant receipt');
+  assertFullReceipt(result.customerReceipt, 'void customer receipt');
   assert.equal(tm004['001'], '004');
   assert.equal(tm004['004'], tm003['005'], 'TM 004 NS = TM 003 sequence');
   assert.equal(tm004['002'], '1234', 'TM 004 echoes the TM 103 amount');
@@ -178,7 +110,7 @@ test('void_995: TM 104 CR=995 is pending, STAN and TM 103 receipt kept', forMode
   assert.equal(result.pendingConfirmation, true);
   assert.equal(result.responseCode, '995');
   assert.ok(result.stan);
-  assert.ok(result.merchantReceipt, 'TM 103 merchant receipt');
+  assertFullReceipt(result.merchantReceipt, 'TM 103 merchant receipt');
 });
 
 test('void_no_confirm: no TM 104 reply is pending, STAN and TM 103 receipt kept', forModes('void_no_confirm'), async () => {
@@ -186,7 +118,7 @@ test('void_no_confirm: no TM 104 reply is pending, STAN and TM 103 receipt kept'
   assert.equal(result.success, false);
   assert.equal(result.pendingConfirmation, true);
   assert.equal(result.stan, payment.stan, 'STAN from TM 103');
-  assert.ok(result.merchantReceipt, 'TM 103 merchant receipt');
+  assertFullReceipt(result.merchantReceipt, 'TM 103 merchant receipt');
 });
 
 test('void_refuse: TM 103 refusal is a failure, not pending', forModes('void_refuse'), async () => {
