@@ -211,13 +211,14 @@ test('cancelPayment: TM003→103 then TM004→104 returns void STAN and both voi
   assert.equal(byTag(nativeCalls[1].tlv)['002'], '000000000150', 'TM 004 echoes the TM 103 amount');
 });
 
-test('cancelPayment: missing TM104 reply (timeout) is tolerated — void committed at TM103', async () => {
+test('cancelPayment: missing TM104 reply (timeout) fails closed with pendingConfirmation', async () => {
   reset();
   nativeResponses = [voidResponse(), new Error('Timeout waiting for response')];
   const client = new NapsPayClient({ host: '127.0.0.1' });
   const result = await client.cancelPayment('000042', '01', '00001', '000001', 150);
 
-  assert.equal(result.success, true);
+  assert.equal(result.success, false);
+  assert.equal(result.pendingConfirmation, true);
   assert.equal(result.responseCode, '000');
   assert.equal(result.stan, '000042');
   assert.ok(result.merchantReceipt.lines.some((l) => l.text === 'ANNULATION Commercant'));

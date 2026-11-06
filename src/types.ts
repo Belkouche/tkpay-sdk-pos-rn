@@ -247,6 +247,8 @@ export interface CancellationResult {
   merchantReceipt?: Receipt;
   /** Customer copy of the void receipt (DP of TM=104) */
   customerReceipt?: Receipt;
+  /** True when MT=103 was accepted but the MT=104 reply timed out — outcome unknown, verify by STAN */
+  pendingConfirmation?: boolean;
   /** Error message if failed */
   error?: string;
 }

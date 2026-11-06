@@ -325,7 +325,9 @@ export class NapsPayClient {
    *   1. Send TM=003 → terminal replies MT=103 (CR=000 = accepted)
    *   2. Send TM=004 → terminal replies MT=104 with the void STAN and customer receipt
    *
-   * A missing MT=104 reply (timeout) is tolerated: the void is committed at MT=103.
+   * A missing MT=104 reply (timeout) is NOT treated as success: the result is
+   * `success: false` with `pendingConfirmation: true` — verify the void by STAN
+   * (e.g. printDuplicate) before treating the transaction as voided.
    *
    * @param stan       STAN of the transaction to cancel
    * @param registerId Register ID (2 digits)
@@ -393,15 +395,17 @@ export class NapsPayClient {
           this.config.confirmationTimeout
         );
       } catch (error: unknown) {
-        // The void is already committed once MT=103 returns CR=000; MT=104 only
-        // carries the void STAN and customer copy, so a missing reply is not a failure.
+        // MT=103 accepted but MT=104 never arrived: the outcome is unknown, so fail
+        // closed and flag it for the caller to verify rather than report success.
         const message = error instanceof Error ? error.message : '';
         if (!/time(d)?\s?out/i.test(message)) throw error;
         return {
-          success: true,
+          success: false,
           responseCode: cr1,
           stan: fields1[TLV_TAGS.STAN],
           merchantReceipt,
+          pendingConfirmation: true,
+          error: 'Void accepted (MT=103) but no MT=104 confirmation received — verify by STAN',
         };
       }
 

@@ -214,7 +214,7 @@ const result = await client.cancelPayment(
 );
 ```
 
-> **Note:** Cancellation opens a **new TCP connection** (not the same socket as the original payment) and runs two phases on it: TM=003 → 103 (void performed), then TM=004 → 104 (void STAN + customer copy). If the TM=104 reply times out the void is still reported as successful — it is committed at TM=103. The SDK handles this.
+> **Note:** Cancellation opens a **new TCP connection** (not the same socket as the original payment) and runs two phases on it: TM=003 → 103 (void performed), then TM=004 → 104 (void STAN + customer copy). If the TM=104 reply times out the outcome is unknown: the result is `success: false` with `pendingConfirmation: true` — verify the void by STAN (e.g. `printDuplicate`) before treating it as done.
 
 **Returns `CancellationResult`:**
 
@@ -225,6 +225,7 @@ const result = await client.cancelPayment(
   stan?: string,   // Void STAN from TM=104 (falls back to the TM=103 STAN)
   merchantReceipt?: Receipt,  // Void receipt, merchant copy (TM=103)
   customerReceipt?: Receipt,  // Void receipt, customer copy (TM=104)
+  pendingConfirmation?: boolean,  // TM=103 accepted but TM=104 timed out — verify by STAN
   error?: string,
 }
 ```
