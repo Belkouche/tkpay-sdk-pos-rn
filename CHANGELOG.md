@@ -18,7 +18,13 @@ NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.
 - Response codes 265, 281, 385, 400, 500 and 888 from the NapsPay ISO table.
 
 ### Changed
-- `cancelPayment`: a missing TM=104 reply (timeout) fails closed — `success: false` with the new `CancellationResult.pendingConfirmation: true`, the TM=103 STAN and merchant receipt — so the caller verifies the void by STAN. This deliberately diverges from the C# SDK, which reports such a void as successful; nothing in the spec shows the void is committed at TM=103.
+- `cancelPayment` follows the NapsPay ECR TLV spec v2.0 §4.3/§4.4 (TM=103 CR=000 only means "transaction found"; TM=004 executes the reversal):
+  - TM=104 **CR=480 or 000** = cancellation completed (`success: true`). CR=480 was previously reported as a failure.
+  - TM=104 **CR=995** = unconfirmed: `success: false`, `pendingConfirmation: true`. It was previously reported as success; the spec defines 995 as "Server processing error", but it was seen with successful voids on the live terminal.
+  - A **missing TM=104 reply** (timeout) fails closed the same way: `success: false`, `pendingConfirmation: true`, with the TM=103 STAN and merchant receipt.
+  - Any other TM=104 CR is a failure. A direct MT=104 reply to TM=003 uses the same rules.
+  - New `CancellationResult.pendingConfirmation` — verify the void by STAN with `printDuplicate` (TM=008) before treating it as done.
+- TM=004 carries the TM=003 sequence in NS (tag 004, spec: 004.NS = 003.NS) and the amount echoed from TM=103 — unchanged; now covered by a unit test.
 - Response-code descriptions aligned with the C# SDK: 383 "Balance updated", 481 "Reversal amount incorrect", 581 "Reconciliation already done".
 
 ## [1.4.0] - 2026-11-06

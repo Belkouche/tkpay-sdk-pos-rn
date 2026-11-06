@@ -10,6 +10,7 @@ import {
   type PaymentResult,
   type SettlementResult,
   type CancellationResult,
+  type Receipt,
   type NetworkTestResult,
   type DuplicateReceiptResult,
   type ResetResult,
@@ -322,12 +323,13 @@ export class NapsPayClient {
    *
    * NapsPay v5.4.4+ requires [amountCentimes] (TAG 002) in the TM=003 frame.
    * Flow on a single TCP connection:
-   *   1. Send TM=003 → terminal replies MT=103 (CR=000 = accepted)
-   *   2. Send TM=004 → terminal replies MT=104 with the void STAN and customer receipt
+   *   1. Send TM=003 → terminal replies MT=103 (CR=000 = transaction found)
+   *   2. Send TM=004 → terminal executes the reversal and replies MT=104
+   *      (CR=480 or 000 = cancellation completed, spec §4.4)
    *
-   * A missing MT=104 reply (timeout) is NOT treated as success: the result is
-   * `success: false` with `pendingConfirmation: true` — verify the void by STAN
-   * (e.g. printDuplicate) before treating the transaction as voided.
+   * A missing MT=104 reply (timeout) or MT=104 CR=995 is NOT treated as success:
+   * the result is `success: false` with `pendingConfirmation: true` — verify the
+   * void by STAN (printDuplicate, TM=008) before treating the transaction as voided.
    *
    * @param stan       STAN of the transaction to cancel
    * @param registerId Register ID (2 digits)
@@ -362,13 +364,7 @@ export class NapsPayClient {
 
       // MT=104 direct means already finalised (shouldn't normally happen)
       if (mt1 === MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE) {
-        return {
-          success: cr1 === '000',
-          responseCode: cr1,
-          stan: fields1[TLV_TAGS.STAN],
-          merchantReceipt,
-          error: cr1 !== '000' ? `Cancellation failed with code: ${cr1}` : undefined,
-        };
+        return this.buildVoidResult(fields1, fields1[TLV_TAGS.STAN], merchantReceipt);
       }
 
       if (mt1 !== MESSAGE_TYPES.CANCELLATION_RESPONSE || cr1 !== '000') {
@@ -381,6 +377,7 @@ export class NapsPayClient {
       }
 
       // Phase 2: send TM=004 confirmation on the same connection → MT=104.
+      // NS (TAG 004) carries the same sequence as the TM=003 (spec §4.4: 004.NS = 003.NS).
       // Echo the amount (TAG 002) from the MT=103 response — required by v5.4.4+.
       const confirmTlv = buildCancellationConfirmation(
         fields1[TLV_TAGS.STAN] ?? stan,
@@ -395,8 +392,8 @@ export class NapsPayClient {
           this.config.confirmationTimeout
         );
       } catch (error: unknown) {
-        // MT=103 accepted but MT=104 never arrived: the outcome is unknown, so fail
-        // closed and flag it for the caller to verify rather than report success.
+        // MT=103 only means the transaction was found; TM=004 executes the reversal
+        // (spec §4.3/§4.4). No MT=104 → outcome unknown: fail closed, flag for verification.
         const message = error instanceof Error ? error.message : '';
         if (!/time(d)?\s?out/i.test(message)) throw error;
         return {
@@ -405,24 +402,11 @@ export class NapsPayClient {
           stan: fields1[TLV_TAGS.STAN],
           merchantReceipt,
           pendingConfirmation: true,
-          error: 'Void accepted (MT=103) but no MT=104 confirmation received — verify by STAN',
+          error: 'No MT=104 cancellation confirmation received — verify by STAN',
         };
       }
 
-      const fields2 = parseTlv(raw2);
-      const cr2 = fields2[TLV_TAGS.CR] ?? '';
-      // CR=000 = confirmed, CR=995 = host processing (also success)
-      const success2 = cr2 === '000' || cr2 === '995';
-      const dp2 = fields2[TLV_TAGS.DP];
-
-      return {
-        success: success2,
-        responseCode: cr2,
-        stan: fields2[TLV_TAGS.STAN] ?? fields1[TLV_TAGS.STAN],
-        merchantReceipt,
-        customerReceipt: dp2 ? parseReceipt(dp2, ReceiptType.CUSTOMER) : undefined,
-        error: !success2 ? `Cancellation failed with code: ${cr2}` : undefined,
-      };
+      return this.buildVoidResult(parseTlv(raw2), fields1[TLV_TAGS.STAN], merchantReceipt);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, responseCode: '', error: message };
@@ -683,6 +667,36 @@ export class NapsPayClient {
       transactionTime: fields[TLV_TAGS.HETR],
       merchantReceipt,
       customerReceipt,
+    };
+  }
+
+  /**
+   * Build cancellation result from the MT=104 reply (spec §4.4):
+   * CR=480 or 000 = completed; CR=995 = unconfirmed (seen with successful voids
+   * on the live terminal) → pending, verify by STAN; anything else = failed.
+   */
+  private buildVoidResult(
+    fields: Record<string, string>,
+    fallbackStan: string | undefined,
+    merchantReceipt: Receipt | undefined
+  ): CancellationResult {
+    const cr = fields[TLV_TAGS.CR] ?? '';
+    const dp = fields[TLV_TAGS.DP];
+    const success = cr === '000' || cr === '480';
+    const pending = cr === '995';
+
+    return {
+      success,
+      responseCode: cr,
+      stan: fields[TLV_TAGS.STAN] ?? fallbackStan,
+      merchantReceipt,
+      customerReceipt: dp ? parseReceipt(dp, ReceiptType.CUSTOMER) : undefined,
+      pendingConfirmation: pending || undefined,
+      error: success
+        ? undefined
+        : pending
+          ? `Cancellation unconfirmed (code: ${cr}) — verify by STAN`
+          : `Cancellation failed with code: ${cr}`,
     };
   }
 

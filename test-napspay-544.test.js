@@ -209,6 +209,61 @@ test('cancelPayment: TM003→103 then TM004→104 returns void STAN and both voi
   assert.equal(byTag(nativeCalls[0].tlv)['001'], '003');
   assert.equal(byTag(nativeCalls[1].tlv)['001'], '004');
   assert.equal(byTag(nativeCalls[1].tlv)['002'], '000000000150', 'TM 004 echoes the TM 103 amount');
+  assert.equal(result.pendingConfirmation, undefined);
+});
+
+test('cancelPayment: TM004 carries the TM003 sequence in NS (tag 004), not NSA (tag 005)', async () => {
+  reset();
+  nativeResponses = [voidResponse(), voidConfirmation()];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  await client.cancelPayment('000042', '01', '00001', '000777', 150);
+
+  const tm003 = byTag(nativeCalls[0].tlv);
+  const tm004 = byTag(nativeCalls[1].tlv);
+  assert.equal(tm004['001'], '004');
+  assert.equal(tm004['004'], '000777');
+  assert.equal(tm004['004'], tm003['005'], '004.NS = sequence sent with TM 003');
+  assert.equal(tm004['005'], undefined, 'no NSA in TM 004');
+  assert.equal(tm004['008'], '000042');
+});
+
+test('cancelPayment: TM104 CR=480 is a completed cancellation (spec §4.4)', async () => {
+  reset();
+  nativeResponses = [voidResponse(), voidConfirmation('480')];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.cancelPayment('000042', '01', '00001', '000001', 150);
+
+  assert.equal(result.success, true);
+  assert.equal(result.responseCode, '480');
+  assert.equal(result.pendingConfirmation, undefined);
+  assert.equal(result.error, undefined);
+  assert.equal(result.stan, '000099');
+});
+
+test('cancelPayment: TM104 CR=995 is pending/unconfirmed — not success, not a hard failure', async () => {
+  reset();
+  nativeResponses = [voidResponse(), voidConfirmation('995')];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.cancelPayment('000042', '01', '00001', '000001', 150);
+
+  assert.equal(result.success, false);
+  assert.equal(result.pendingConfirmation, true);
+  assert.equal(result.responseCode, '995');
+  assert.equal(result.stan, '000099');
+  assert.ok(result.merchantReceipt.lines.some((l) => l.text === 'ANNULATION Commercant'));
+  assert.match(result.error, /verify by STAN/);
+});
+
+test('cancelPayment: direct MT=104 reply to TM003 uses the same CR rules', async () => {
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  for (const [cr, success, pending] of [['480', true, undefined], ['000', true, undefined], ['995', false, true], ['482', false, undefined]]) {
+    reset();
+    nativeResponses = [voidConfirmation(cr)];
+    const result = await client.cancelPayment('000042', '01', '00001', '000001', 150);
+    assert.equal(result.success, success, `CR=${cr}`);
+    assert.equal(result.pendingConfirmation, pending, `CR=${cr}`);
+    assert.equal(nativeCalls.length, 1, 'no TM 004 after a direct MT=104');
+  }
 });
 
 test('cancelPayment: missing TM104 reply (timeout) fails closed with pendingConfirmation', async () => {
@@ -232,6 +287,7 @@ test('cancelPayment: TM104 refusal fails the void; connection errors still fail'
   const refused = await client.cancelPayment('000042', '01', '00001', '000001', 150);
   assert.equal(refused.success, false);
   assert.equal(refused.responseCode, '302');
+  assert.equal(refused.pendingConfirmation, undefined, 'a refusal is a hard failure, not pending');
 
   reset();
   nativeResponses = [voidResponse(), new Error('No active connection')];
