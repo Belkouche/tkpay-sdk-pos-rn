@@ -16,6 +16,7 @@ NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.
 - `CancellationResult.merchantReceipt` (DP of TM=103) and `CancellationResult.customerReceipt` (DP of TM=104).
 - `MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE` (`'104'`); `CANCELLATION_CORRECTION` is kept as a deprecated alias.
 - Response codes 265, 281, 385, 400, 500 and 888 from the NapsPay ISO table.
+- Emulator integration tests `test-integration.test.js`, selected by mode: `NAPS_PORT=4456 NAPS_EMULATOR_MODE=<mode> npm run test:integration` against `naps_emulator.py --port 4456 --mode <mode>`. Covers approve, decline, confirm_error, void_480, void_995, void_no_confirm and void_refuse.
 
 ### Changed
 - `cancelPayment` follows the NapsPay ECR TLV spec v2.0 §4.3/§4.4 (TM=103 CR=000 only means "transaction found"; TM=004 executes the reversal):
