@@ -12,7 +12,9 @@ React Native SDK for integrating **NAPS Pay POS terminals** into your mobile app
 
 Implements the full **NAPS M2M TLV protocol** — the same binary protocol used by physical SUNMI terminals in production. Works on iOS and Android. Full TypeScript support.
 
-[![npm version](https://img.shields.io/badge/version-1.1.0-blue)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
+Targets **NapsPay v5.4.4** (TLV v2, `!` terminator), tracking the canonical C# SDK.
+
+[![npm version](https://img.shields.io/badge/version-1.4.0-blue)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
 [![platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
 
 ---
@@ -29,6 +31,7 @@ Implements the full **NAPS M2M TLV protocol** — the same binary protocol used 
    - [printDuplicate](#printduplicate)
    - [resetPinPad](#resetpinpad)
    - [referencing](#referencing)
+   - [totals](#totals)
    - [settlement](#settlement)
    - [testConnection](#testconnection)
 5. [Receipts](#receipts)
@@ -327,8 +330,11 @@ Sends **TM=013** to sync merchant configuration from the NAPS server.
 - After a terminal swap or configuration change
 - When the terminal reports configuration errors
 
+The optional third argument selects the parameter set (TIDE, tag 020): `TIDE.MERCHANT` (`"01"`, default) or `TIDE.RECHARGE` (`"02"`).
+
 ```typescript
-const ref = await client.referencing('01', '00001');
+const ref = await client.referencing('01', '00001');            // merchant set
+// await client.referencing('01', '00001', TIDE.RECHARGE);     // recharge set
 
 if (ref.success) {
   console.log('Terminal configured');
@@ -342,10 +348,27 @@ if (ref.success) {
 {
   success: boolean,
   responseCode: string,
+  parameterSet?: string,  // "01" merchant, "02" recharge
   receipt?: Receipt,  // Contains MID, TID, merchant name, currency
   error?: string,
 }
 ```
+
+---
+
+### `totals`
+
+Sends **TM=010** with a sequence number to read the terminal's running batch totals.
+
+```typescript
+const tot = await client.totals('01', '00001');
+
+if (tot.success) {
+  // tot.receipt contains the totals report
+}
+```
+
+**Returns `TotalsResult`:** `{ success, responseCode, receipt?, error? }`
 
 ---
 

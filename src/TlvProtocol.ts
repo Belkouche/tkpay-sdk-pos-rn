@@ -14,6 +14,7 @@ import {
   RECEIPT_TAGS,
   MESSAGE_TYPES,
   CURRENCY,
+  TIDE,
   Alignment,
   ReceiptType,
   type Receipt,
@@ -165,6 +166,7 @@ function getCurrentTime(): string {
 
 /**
  * Build payment request TLV
+ * Sends the current date/time in both DA/HE (local clock) and DATR/HETR (transaction).
  */
 export function buildPaymentRequest(
   amount: number,
@@ -172,6 +174,8 @@ export function buildPaymentRequest(
   sequence: string
 ): string {
   const amountMinor = Math.round(amount * 100).toString();
+  const date = getCurrentDate();
+  const time = getCurrentTime();
 
   return (
     buildField(TLV_TAGS.TM, MESSAGE_TYPES.PAYMENT_REQUEST) +
@@ -179,8 +183,10 @@ export function buildPaymentRequest(
     buildField(TLV_TAGS.NCAI, ncai) +
     buildField(TLV_TAGS.NS, sequence) +
     buildField(TLV_TAGS.DE, CURRENCY.MAD) +
-    buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime())
+    buildField(TLV_TAGS.DA, date) +
+    buildField(TLV_TAGS.HE, time) +
+    buildField(TLV_TAGS.DATR, date) +
+    buildField(TLV_TAGS.HETR, time)
   );
 }
 
@@ -311,10 +317,11 @@ export function buildCancellationConfirmation(
 /**
  * Build network test request TLV (TM=009)
  */
-export function buildNetworkTestRequest(ncai: string): string {
+export function buildNetworkTestRequest(ncai: string, sequence: string = '000001'): string {
   return (
     buildField(TLV_TAGS.TM, MESSAGE_TYPES.NETWORK_TEST_REQUEST) +
     buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence) +
     buildField(TLV_TAGS.DA, getCurrentDate()) +
     buildField(TLV_TAGS.HE, getCurrentTime())
   );
@@ -323,11 +330,17 @@ export function buildNetworkTestRequest(ncai: string): string {
 /**
  * Build duplicate receipt request TLV (TM=008)
  * @param stan  STAN of the transaction to reprint (optional — terminal uses last if absent)
+ * @param sequence  Sequence number (NS / TAG 004)
  */
-export function buildDuplicateRequest(ncai: string, stan?: string): string {
+export function buildDuplicateRequest(
+  ncai: string,
+  stan?: string,
+  sequence: string = '000001'
+): string {
   let tlv =
     buildField(TLV_TAGS.TM, MESSAGE_TYPES.DUPLICATE_REQUEST) +
-    buildField(TLV_TAGS.NCAI, ncai);
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence);
   if (stan) {
     tlv += buildField(TLV_TAGS.STAN, stan);
   }
@@ -340,10 +353,24 @@ export function buildDuplicateRequest(ncai: string, stan?: string): string {
 /**
  * Build reset PinPAD request TLV (TM=012)
  */
-export function buildResetRequest(ncai: string): string {
+export function buildResetRequest(ncai: string, sequence: string = '000001'): string {
   return (
     buildField(TLV_TAGS.TM, MESSAGE_TYPES.RESET_REQUEST) +
     buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence) +
+    buildField(TLV_TAGS.DA, getCurrentDate()) +
+    buildField(TLV_TAGS.HE, getCurrentTime())
+  );
+}
+
+/**
+ * Build totals report request TLV (TM=010 — shares TM with settlement, carries NS)
+ */
+export function buildTotalsRequest(ncai: string, sequence: string = '000001'): string {
+  return (
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.TOTALS_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence) +
     buildField(TLV_TAGS.DA, getCurrentDate()) +
     buildField(TLV_TAGS.HE, getCurrentTime())
   );
@@ -351,13 +378,20 @@ export function buildResetRequest(ncai: string): string {
 
 /**
  * Build referencing request TLV (TM=013)
+ * @param tide  Parameter set to load (TAG 020): "01" merchant (default), "02" recharge
  */
-export function buildReferencingRequest(ncai: string): string {
+export function buildReferencingRequest(
+  ncai: string,
+  sequence: string = '000001',
+  tide: string = TIDE.MERCHANT
+): string {
   return (
     buildField(TLV_TAGS.TM, MESSAGE_TYPES.REFERENCING_REQUEST) +
     buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence) +
     buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime())
+    buildField(TLV_TAGS.HE, getCurrentTime()) +
+    buildField(TLV_TAGS.TIDE, tide)
   );
 }
 

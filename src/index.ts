@@ -18,6 +18,7 @@ export {
   type DuplicateReceiptResult,
   type ResetResult,
   type ReferencingResult,
+  type TotalsResult,
   type Receipt,
   type ReceiptLine,
   ReceiptType,
@@ -28,10 +29,12 @@ export {
   TLV_TAGS,
   MESSAGE_TYPES,
   CURRENCY,
+  TIDE,
 } from './types';
 
 // Export TLV utilities (for advanced usage)
 export {
+  buildField,
   buildPaymentRequest,
   buildConfirmationRequest,
   buildSettlementRequest,
@@ -41,6 +44,7 @@ export {
   buildDuplicateRequest,
   buildResetRequest,
   buildReferencingRequest,
+  buildTotalsRequest,
   parseTlv,
   parseReceipt,
   receiptToPlainText,

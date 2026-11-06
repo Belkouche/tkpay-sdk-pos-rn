@@ -14,7 +14,9 @@ import {
   type DuplicateReceiptResult,
   type ResetResult,
   type ReferencingResult,
+  type TotalsResult,
   TLV_TAGS,
+  TIDE,
   MESSAGE_TYPES,
   ReceiptType,
   ProtocolVersion,
@@ -32,6 +34,7 @@ import {
   buildDuplicateRequest,
   buildResetRequest,
   buildReferencingRequest,
+  buildTotalsRequest,
   parseTlv,
   parseReceipt,
   maskCardNumber,
@@ -180,8 +183,8 @@ export class NapsPayClient {
 
       const confirmFields = parseTlv(confirmResponse);
 
-      // Build successful result
-      const result = this.buildSuccessResult(confirmFields, request.amount);
+      // Build successful result — merchant copy from Phase 1, customer copy from Phase 2
+      const result = this.buildSuccessResult(paymentFields, confirmFields);
 
       // Send notification to gateway
       notifyTransaction(this.config.host, request, result);
@@ -276,7 +279,7 @@ export class NapsPayClient {
     cashierId: string
   ): Promise<NetworkTestResult> {
     const ncai = registerId + cashierId;
-    const tlv = buildNetworkTestRequest(ncai);
+    const tlv = buildNetworkTestRequest(ncai, this.generateSequence());
     const start = Date.now();
 
     try {
@@ -407,7 +410,7 @@ export class NapsPayClient {
     stan?: string
   ): Promise<DuplicateReceiptResult> {
     const ncai = registerId + cashierId;
-    const tlv = buildDuplicateRequest(ncai, stan);
+    const tlv = buildDuplicateRequest(ncai, stan, this.generateSequence());
 
     try {
       const raw = await getNativeModule().sendPaymentRequest(
@@ -452,7 +455,7 @@ export class NapsPayClient {
     cashierId: string
   ): Promise<ResetResult> {
     const ncai = registerId + cashierId;
-    const tlv = buildResetRequest(ncai);
+    const tlv = buildResetRequest(ncai, this.generateSequence());
 
     try {
       const raw = await getNativeModule().sendPaymentRequest(
@@ -487,13 +490,61 @@ export class NapsPayClient {
    *
    * @param registerId Register ID (2 digits)
    * @param cashierId  Cashier ID (5 digits)
+   * @param tide       Parameter set (TAG 020): TIDE.MERCHANT "01" (default) or TIDE.RECHARGE "02"
    */
   async referencing(
     registerId: string,
-    cashierId: string
+    cashierId: string,
+    tide: string = TIDE.MERCHANT
   ): Promise<ReferencingResult> {
     const ncai = registerId + cashierId;
-    const tlv = buildReferencingRequest(ncai);
+    const tlv = buildReferencingRequest(ncai, this.generateSequence(), tide);
+
+    try {
+      const raw = await getNativeModule().sendPaymentRequest(
+        this.config.host,
+        this.config.port,
+        tlv,
+        this.config.timeout
+      );
+
+      const fields = parseTlv(raw);
+      const responseCode = fields[TLV_TAGS.CR] ?? '';
+      const dpValue = fields[TLV_TAGS.DP];
+      const receipt = dpValue
+        ? parseReceipt(dpValue, ReceiptType.MERCHANT)
+        : undefined;
+
+      return {
+        success: responseCode === '000',
+        responseCode,
+        parameterSet: fields[TLV_TAGS.TIDE] ?? tide,
+        receipt,
+        error: responseCode !== '000'
+          ? `Referencing failed with code: ${responseCode}`
+          : undefined,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, responseCode: '', error: message };
+    }
+  }
+
+  /**
+   * Request the terminal's running batch totals (TM=010)
+   *
+   * Shares the TM with settlement() but carries a sequence number (NS)
+   * and returns the totals receipt.
+   *
+   * @param registerId Register ID (2 digits)
+   * @param cashierId  Cashier ID (5 digits)
+   */
+  async totals(
+    registerId: string,
+    cashierId: string
+  ): Promise<TotalsResult> {
+    const ncai = registerId + cashierId;
+    const tlv = buildTotalsRequest(ncai, this.generateSequence());
 
     try {
       const raw = await getNativeModule().sendPaymentRequest(
@@ -515,7 +566,7 @@ export class NapsPayClient {
         responseCode,
         receipt,
         error: responseCode !== '000'
-          ? `Referencing failed with code: ${responseCode}`
+          ? `Totals failed with code: ${responseCode}`
           : undefined,
       };
     } catch (error: unknown) {
@@ -560,16 +611,17 @@ export class NapsPayClient {
    * Build successful payment result
    */
   private buildSuccessResult(
-    fields: Record<string, string>,
-    amount: number
+    paymentFields: Record<string, string>,
+    fields: Record<string, string>
   ): PaymentResult {
-    // Parse receipts
-    const dpValue = fields[TLV_TAGS.DP];
-    let merchantReceipt = dpValue
-      ? parseReceipt(dpValue, ReceiptType.MERCHANT)
+    // Parse receipts: Phase-1 DP is the merchant copy, Phase-2 DP the customer copy
+    const merchantDp = paymentFields[TLV_TAGS.DP];
+    const customerDp = fields[TLV_TAGS.DP];
+    let merchantReceipt = merchantDp
+      ? parseReceipt(merchantDp, ReceiptType.MERCHANT)
       : undefined;
-    let customerReceipt = dpValue
-      ? parseReceipt(dpValue, ReceiptType.CUSTOMER)
+    const customerReceipt = customerDp
+      ? parseReceipt(customerDp, ReceiptType.CUSTOMER)
       : undefined;
 
     const stan = fields[TLV_TAGS.STAN] || '';
@@ -624,10 +676,16 @@ export class NapsPayClient {
         errorMessage = `${describeResponseCode(responseCode)} (code: ${responseCode})`;
     }
 
+    const dpValue = fields[TLV_TAGS.DP];
+
     return {
       success: false,
       responseCode,
       stan: fields[TLV_TAGS.STAN],
+      maskedCardNumber: fields[TLV_TAGS.NCAR],
+      merchantReceipt: dpValue
+        ? parseReceipt(dpValue, ReceiptType.MERCHANT)
+        : undefined,
       error: errorMessage,
     };
   }

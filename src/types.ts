@@ -295,7 +295,23 @@ export interface ReferencingResult {
   success: boolean;
   /** Response code */
   responseCode: string;
+  /** Parameter set loaded (TIDE / tag 020): "01" merchant, "02" recharge */
+  parameterSet?: string;
   /** Referencing/config receipt */
+  receipt?: Receipt;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Totals Result (TM=010)
+ */
+export interface TotalsResult {
+  /** Whether totals were returned */
+  success: boolean;
+  /** Response code */
+  responseCode: string;
+  /** Totals receipt */
   receipt?: Receipt;
   /** Error message if failed */
   error?: string;
@@ -319,10 +335,20 @@ export const MESSAGE_TYPES = {
   NETWORK_TEST_RESPONSE: '109',
   SETTLEMENT_REQUEST: '010',
   SETTLEMENT_RESPONSE: '110',
+  TOTALS_REQUEST: '010', // Totals report — shares TM with settlement
+  TOTALS_RESPONSE: '110',
   RESET_REQUEST: '012',
   RESET_RESPONSE: '112',
   REFERENCING_REQUEST: '013',
   REFERENCING_RESPONSE: '113',
+} as const;
+
+/**
+ * TIDE (tag 020) parameter sets for Referencing (TM=013)
+ */
+export const TIDE = {
+  MERCHANT: '01',
+  RECHARGE: '02',
 } as const;
 
 /**

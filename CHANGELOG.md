@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-06
+
+NapsPay v5.4.4 sync with the canonical C# SDK (v1.4.0).
+
+### Added
+- `totals(registerId, cashierId)` — TM=010 totals report carrying a sequence number (NS); returns `TotalsResult` with the totals receipt.
+- `referencing(registerId, cashierId, tide?)` now sends the TIDE (tag 020) parameter-set selector — `TIDE.MERCHANT` `"01"` (default) or `TIDE.RECHARGE` `"02"` — and reports it as `ReferencingResult.parameterSet`. New `TIDE` constant.
+- `buildField` and `buildTotalsRequest` exported for advanced use.
+- Unit tests `test-napspay-544.test.js` (run by `npm test`).
+
+### Changed
+- Payment request (TM=001) now carries DATR/HETR (tags 018/019) alongside DA/HE.
+- Management requests (TM=008/009/012/013) now carry the sequence number (NS / tag 004) after NCAI; the client passes its generated sequence.
+- `processPayment`: the merchant receipt now comes from the Phase‑1 response (TM=101) DP and the customer receipt from the Phase‑2 response (TM=102) DP. Both were previously parsed from the Phase‑2 DP.
+- Declined payments now return the masked PAN and the decline receipt (`merchantReceipt`).
+
 ## [1.3.0] - 2026-09-12
 
 ### Added
