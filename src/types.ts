@@ -234,15 +234,19 @@ export interface SettlementResult {
 }
 
 /**
- * Cancellation Result (TM=003)
+ * Cancellation Result (TM=003 → 103, then TM=004 → 104)
  */
 export interface CancellationResult {
   /** Whether cancellation was accepted */
   success: boolean;
   /** Response code (000 = accepted) */
   responseCode: string;
-  /** STAN of the cancelled transaction */
+  /** STAN echoed by the terminal (the void's STAN from TM=104 when available) */
   stan?: string;
+  /** Merchant copy of the void receipt (DP of TM=103) */
+  merchantReceipt?: Receipt;
+  /** Customer copy of the void receipt (DP of TM=104) */
+  customerReceipt?: Receipt;
   /** Error message if failed */
   error?: string;
 }
@@ -328,6 +332,8 @@ export const MESSAGE_TYPES = {
   CANCELLATION_REQUEST: '003',
   CANCELLATION_RESPONSE: '103',
   CANCELLATION_CONFIRMATION_REQUEST: '004',
+  CANCELLATION_CONFIRMATION_RESPONSE: '104',
+  /** @deprecated Use CANCELLATION_CONFIRMATION_RESPONSE — 104 is the reply to TM=004 */
   CANCELLATION_CORRECTION: '104',
   DUPLICATE_REQUEST: '008',
   DUPLICATE_RESPONSE: '108',

@@ -20,7 +20,9 @@ const fakeNative = {
   },
   sendConfirmation: async (tlv, timeout) => {
     nativeCalls.push({ fn: 'sendConfirmation', tlv, timeout });
-    return nativeResponses.shift();
+    const response = nativeResponses.shift();
+    if (response instanceof Error) throw response;
+    return response;
   },
 };
 const originalLoad = Module._load;
@@ -43,6 +45,7 @@ const {
   NapsPayClient,
   TIDE,
   ReceiptType,
+  describeResponseCode,
 } = require('./lib');
 
 /** Decode a TLV string into an ordered list of {tag, value} entries. */
@@ -165,4 +168,80 @@ test('referencing() sends the requested TIDE and reports the parameter set', asy
   assert.equal(result.success, true);
   assert.equal(result.parameterSet, '02');
   assert.equal(byTag(nativeCalls[0].tlv)['020'], '02');
+});
+
+test('processPayment: TM102 refusal (CR != 000) is not an approval', async () => {
+  reset();
+  nativeResponses = [
+    buildField('001', '101') + buildField('013', '000') + buildField('008', '000044') +
+      buildField('007', '516794******3315') + buildField('010', dp('Copie Commercant')),
+    buildField('001', '102') + buildField('013', '482') + buildField('008', '000044') +
+      buildField('010', dp('ANNULEE')),
+  ];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.processPayment({ amount: 1, registerId: '01', cashierId: '00001' });
+
+  assert.equal(result.success, false);
+  assert.equal(result.responseCode, '482');
+  assert.equal(result.error, 'Transaction already cancelled');
+  assert.ok(result.merchantReceipt.lines.some((l) => l.text === 'ANNULEE'));
+});
+
+/** TM 103 (void performed) and TM 104 (void confirmation) replies. */
+const voidResponse = (cr = '000') =>
+  buildField('001', '103') + buildField('013', cr) + buildField('002', '000000000150') +
+  buildField('008', '000042') + buildField('010', dp('ANNULATION Commercant'));
+const voidConfirmation = (cr = '000') =>
+  buildField('001', '104') + buildField('013', cr) + buildField('008', '000099') +
+  buildField('010', dp('ANNULATION Client'));
+
+test('cancelPayment: TM003→103 then TM004→104 returns void STAN and both void receipts', async () => {
+  reset();
+  nativeResponses = [voidResponse(), voidConfirmation()];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.cancelPayment('000042', '01', '00001', '000001', 150);
+
+  assert.equal(result.success, true);
+  assert.equal(result.responseCode, '000');
+  assert.equal(result.stan, '000099', 'void STAN from TM 104');
+  assert.ok(result.merchantReceipt.lines.some((l) => l.text === 'ANNULATION Commercant'));
+  assert.ok(result.customerReceipt.lines.some((l) => l.text === 'ANNULATION Client'));
+  assert.equal(byTag(nativeCalls[0].tlv)['001'], '003');
+  assert.equal(byTag(nativeCalls[1].tlv)['001'], '004');
+  assert.equal(byTag(nativeCalls[1].tlv)['002'], '000000000150', 'TM 004 echoes the TM 103 amount');
+});
+
+test('cancelPayment: missing TM104 reply (timeout) is tolerated — void committed at TM103', async () => {
+  reset();
+  nativeResponses = [voidResponse(), new Error('Timeout waiting for response')];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.cancelPayment('000042', '01', '00001', '000001', 150);
+
+  assert.equal(result.success, true);
+  assert.equal(result.responseCode, '000');
+  assert.equal(result.stan, '000042');
+  assert.ok(result.merchantReceipt.lines.some((l) => l.text === 'ANNULATION Commercant'));
+  assert.equal(result.customerReceipt, undefined);
+});
+
+test('cancelPayment: TM104 refusal fails the void; connection errors still fail', async () => {
+  reset();
+  nativeResponses = [voidResponse(), voidConfirmation('302')];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const refused = await client.cancelPayment('000042', '01', '00001', '000001', 150);
+  assert.equal(refused.success, false);
+  assert.equal(refused.responseCode, '302');
+
+  reset();
+  nativeResponses = [voidResponse(), new Error('No active connection')];
+  const dropped = await client.cancelPayment('000042', '01', '00001', '000001', 150);
+  assert.equal(dropped.success, false);
+});
+
+test('response-code table covers the full NapsPay ISO list', () => {
+  for (const code of ['265', '281', '385', '400', '500', '888']) {
+    assert.ok(!describeResponseCode(code).startsWith('Unknown'), code);
+  }
+  assert.equal(describeResponseCode('481'), 'Reversal amount incorrect');
+  assert.equal(describeResponseCode('581'), 'Reconciliation already done');
 });

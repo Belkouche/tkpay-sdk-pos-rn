@@ -14,7 +14,7 @@ Implements the full **NAPS M2M TLV protocol** — the same binary protocol used 
 
 Targets **NapsPay v5.4.4** (TLV v2, `!` terminator), tracking the canonical C# SDK.
 
-[![npm version](https://img.shields.io/badge/version-1.4.0-blue)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
+[![npm version](https://img.shields.io/badge/version-1.5.0-blue)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
 [![platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey)](https://github.com/Belkouche/tkpay-sdk-pos-rn)
 
 ---
@@ -210,10 +210,11 @@ const result = await client.cancelPayment(
   registerId,  // Same register ID used for the original payment
   cashierId,   // Same cashier ID
   sequence,    // Same sequence number
+  amountCentimes, // Original amount in centimes — required by NapsPay v5.4.4+
 );
 ```
 
-> **Note:** Cancellation opens a **new TCP connection** (not the same socket as the original payment). The SDK handles this.
+> **Note:** Cancellation opens a **new TCP connection** (not the same socket as the original payment) and runs two phases on it: TM=003 → 103 (void performed), then TM=004 → 104 (void STAN + customer copy). If the TM=104 reply times out the void is still reported as successful — it is committed at TM=103. The SDK handles this.
 
 **Returns `CancellationResult`:**
 
@@ -221,7 +222,9 @@ const result = await client.cancelPayment(
 {
   success: boolean,
   responseCode: string,
-  stan?: string,   // Confirmed STAN of the cancelled transaction
+  stan?: string,   // Void STAN from TM=104 (falls back to the TM=103 STAN)
+  merchantReceipt?: Receipt,  // Void receipt, merchant copy (TM=103)
+  customerReceipt?: Receipt,  // Void receipt, customer copy (TM=104)
   error?: string,
 }
 ```
@@ -234,7 +237,7 @@ const payment = await client.processPayment({ amount: 100, registerId: '01', cas
 
 // Cancel it (e.g. customer changed their mind)
 if (payment.success && payment.stan) {
-  const cancel = await client.cancelPayment(payment.stan, '01', '00001', payment.sequence!);
+  const cancel = await client.cancelPayment(payment.stan, '01', '00001', payment.sequence!, 10000);
   console.log(cancel.success ? 'Cancelled' : 'Cancel failed: ' + cancel.error);
 }
 ```

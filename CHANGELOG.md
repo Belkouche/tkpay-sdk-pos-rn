@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-11-06
+
+NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.4.4 emulator (two-phase void, `confirm_error` mode).
+
+### Fixed
+- **Refused payment confirmation reported as approved.** A TM=102 with CR ≠ 000 (e.g. 302 sale not found, 482 already cancelled — the terminal auto-reverses) now yields a failed `PaymentResult` with the decline receipt instead of `success: true`.
+
+### Added
+- `CancellationResult.merchantReceipt` (DP of TM=103) and `CancellationResult.customerReceipt` (DP of TM=104).
+- `MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE` (`'104'`); `CANCELLATION_CORRECTION` is kept as a deprecated alias.
+- Response codes 265, 281, 385, 400, 500 and 888 from the NapsPay ISO table.
+
+### Changed
+- `cancelPayment`: a missing TM=104 reply (timeout) is tolerated — the void is committed at TM=103, so the result is successful with the TM=103 STAN and merchant receipt. Other errors still fail.
+- Response-code descriptions aligned with the C# SDK: 383 "Balance updated", 481 "Reversal amount incorrect", 581 "Reconciliation already done".
+
 ## [1.4.0] - 2026-11-06
 
 NapsPay v5.4.4 sync with the canonical C# SDK (v1.4.0).

@@ -183,6 +183,15 @@ export class NapsPayClient {
 
       const confirmFields = parseTlv(confirmResponse);
 
+      // The terminal can refuse the confirmation (TM=102): 302 = sale not found,
+      // 482 = already cancelled (the terminal auto-reverses). Not an approval.
+      const confirmCode = confirmFields[TLV_TAGS.CR];
+      if (confirmCode !== undefined && confirmCode !== '000') {
+        const result = this.buildFailedResult(confirmCode, confirmFields);
+        notifyTransaction(this.config.host, request, result);
+        return result;
+      }
+
       // Build successful result — merchant copy from Phase 1, customer copy from Phase 2
       const result = this.buildSuccessResult(paymentFields, confirmFields);
 
@@ -314,7 +323,9 @@ export class NapsPayClient {
    * NapsPay v5.4.4+ requires [amountCentimes] (TAG 002) in the TM=003 frame.
    * Flow on a single TCP connection:
    *   1. Send TM=003 → terminal replies MT=103 (CR=000 = accepted)
-   *   2. Send TM=004 → terminal replies MT=104 with the final result
+   *   2. Send TM=004 → terminal replies MT=104 with the void STAN and customer receipt
+   *
+   * A missing MT=104 reply (timeout) is tolerated: the void is committed at MT=103.
    *
    * @param stan       STAN of the transaction to cancel
    * @param registerId Register ID (2 digits)
@@ -344,13 +355,16 @@ export class NapsPayClient {
       const fields1 = parseTlv(raw1);
       const mt1 = fields1[TLV_TAGS.TM] ?? '';
       const cr1 = fields1[TLV_TAGS.CR] ?? '';
+      const dp1 = fields1[TLV_TAGS.DP];
+      const merchantReceipt = dp1 ? parseReceipt(dp1, ReceiptType.MERCHANT) : undefined;
 
       // MT=104 direct means already finalised (shouldn't normally happen)
-      if (mt1 === MESSAGE_TYPES.CANCELLATION_CORRECTION) {
+      if (mt1 === MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE) {
         return {
           success: cr1 === '000',
           responseCode: cr1,
           stan: fields1[TLV_TAGS.STAN],
+          merchantReceipt,
           error: cr1 !== '000' ? `Cancellation failed with code: ${cr1}` : undefined,
         };
       }
@@ -372,20 +386,37 @@ export class NapsPayClient {
         sequence,
         fields1[TLV_TAGS.MT]
       );
-      const raw2 = await getNativeModule().sendConfirmation(
-        confirmTlv,
-        this.config.confirmationTimeout
-      );
+      let raw2: string;
+      try {
+        raw2 = await getNativeModule().sendConfirmation(
+          confirmTlv,
+          this.config.confirmationTimeout
+        );
+      } catch (error: unknown) {
+        // The void is already committed once MT=103 returns CR=000; MT=104 only
+        // carries the void STAN and customer copy, so a missing reply is not a failure.
+        const message = error instanceof Error ? error.message : '';
+        if (!/time(d)?\s?out/i.test(message)) throw error;
+        return {
+          success: true,
+          responseCode: cr1,
+          stan: fields1[TLV_TAGS.STAN],
+          merchantReceipt,
+        };
+      }
 
       const fields2 = parseTlv(raw2);
       const cr2 = fields2[TLV_TAGS.CR] ?? '';
       // CR=000 = confirmed, CR=995 = host processing (also success)
       const success2 = cr2 === '000' || cr2 === '995';
+      const dp2 = fields2[TLV_TAGS.DP];
 
       return {
         success: success2,
         responseCode: cr2,
         stan: fields2[TLV_TAGS.STAN] ?? fields1[TLV_TAGS.STAN],
+        merchantReceipt,
+        customerReceipt: dp2 ? parseReceipt(dp2, ReceiptType.CUSTOMER) : undefined,
         error: !success2 ? `Cancellation failed with code: ${cr2}` : undefined,
       };
     } catch (error: unknown) {
