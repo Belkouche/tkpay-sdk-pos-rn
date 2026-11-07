@@ -239,6 +239,6 @@ try {
 
 - **Amount**: Always specified in centimes (smallest currency unit). 150.00 MAD = 15000 centimes.
 - **Currency**: Currently only MAD (Moroccan Dirham, code 504) is supported.
-- **PAN Masking**: Card numbers are automatically masked by the SDK for PCI compliance.
+- **PAN Masking**: Card numbers are automatically masked by the SDK (first 6 + last 4 digits); the full PAN is never exposed.
 - **Timeout**: Allow at least 120 seconds for the payment flow to complete (customer may need time to tap/insert card and enter PIN).
 - **Merchant Receipt**: Automatically enhanced with STAN, NCAI, and Sequence Number for reconciliation.
