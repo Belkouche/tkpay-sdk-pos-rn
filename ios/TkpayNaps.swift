@@ -41,7 +41,7 @@ class TkpayNaps: NSObject {
                 let response = try self.receiveResponse(timeout: timeout)
 
                 // Keep connection open for confirmation
-                resolve(response)
+                resolve(PanMasker.maskReply(response))
 
             } catch {
                 self.closeConnection()
@@ -80,7 +80,7 @@ class TkpayNaps: NSObject {
                 // Close connection after confirmation
                 self.closeConnection()
 
-                resolve(response)
+                resolve(PanMasker.maskReply(response))
 
             } catch {
                 self.closeConnection()
@@ -112,8 +112,8 @@ class TkpayNaps: NSObject {
                 &writeStream
             )
 
-            guard let inputStream = readStream?.takeRetainedValue(),
-                  let outputStream = writeStream?.takeRetainedValue() else {
+            guard let inputStream = readStream?.takeRetainedValue() as InputStream?,
+                  let outputStream = writeStream?.takeRetainedValue() as OutputStream? else {
                 resolve(false)
                 return
             }

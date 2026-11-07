@@ -401,44 +401,50 @@ export function buildReferencingRequest(
   );
 }
 
+/** Characters that may separate the digits of a card number (one at a time). */
+const CARD_SEPARATORS = /[ \-.\t\u00A0]/g;
+
 /**
- * Mask card number to show only first 6 and last 4 digits
- * Digits are counted, so spaces or dashes are kept in place.
- * Example: 5167940123453315 -> 516794******3315, 5167 9401 2345 3315 -> 5167 94** **** 3315
+ * Card-shaped run: 13 or more digits, each next digit adjacent or after exactly
+ * one separator (space, dash, dot, tab, non-breaking space).
  */
-export function maskCardNumber(cardNumber: string): string {
-  if (!cardNumber) {
-    return cardNumber;
-  }
+const CARD_RUN = /\d(?:[ \-.\t\u00A0]?\d){12,}/g;
 
-  const digitCount = cardNumber.replace(/\D/g, '').length;
-  if (digitCount < 10) {
-    return cardNumber;
-  }
-
+/** Replace every digit except the first 6 and last 4 with '*', keeping separators. */
+function maskDigits(run: string): string {
+  const digitCount = run.replace(/\D/g, '').length;
   let digitIndex = 0;
-  return cardNumber.replace(/\d/g, (digit) => {
+  return run.replace(/\d/g, (digit) => {
     const i = digitIndex++;
     return i < 6 || i >= digitCount - 4 ? digit : '*';
   });
 }
 
 /**
- * Card numbers in text: 13+ digits written together, in groups of 4
- * (4-4-4-4, 4-4-4-4-3, …) or as 4-6-5, separated by spaces or dashes.
- * Longer runs match too, so a card number followed by more digits is still masked.
+ * Mask a card number (tag 007): first 6 + '*' + last 4 digits, whatever
+ * grouping it arrived in.
+ * Example: 5167940123453315 or 5167 9401 2345 3315 -> 516794******3315
  */
-const CARD_NUMBER_IN_TEXT =
-  /\b(?:\d{4}(?:[ -]\d{4}){2,}(?:[ -]\d{1,4})?|\d{4}[ -]\d{6}[ -]\d{4,5}|\d{13,})\b/g;
+export function maskCardNumber(cardNumber: string): string {
+  if (!cardNumber) {
+    return cardNumber;
+  }
+
+  const compact = cardNumber.replace(CARD_SEPARATORS, '');
+  if (compact.length < 10) {
+    return cardNumber;
+  }
+
+  return compact.slice(0, 6) + compact.slice(6, -4).replace(/\d/g, '*') + compact.slice(-4);
+}
 
 /**
- * Mask any card number (13-19 digits, optionally with spaces or dashes) in text.
- * Fails closed: a run of more than 19 digits is masked as well.
+ * Mask every card-shaped run (13+ digits, see CARD_RUN) in free text: all
+ * digits except the first 6 and last 4 of the run. Separators and the line
+ * layout are kept; runs over 19 digits are masked the same way.
  */
 export function maskCardNumbersInText(text: string): string {
-  return text.replace(CARD_NUMBER_IN_TEXT, (match) =>
-    match.replace(/\D/g, '').length >= 13 ? maskCardNumber(match) : match
-  );
+  return text.replace(CARD_RUN, maskDigits);
 }
 
 /**
@@ -475,9 +481,11 @@ export function parseTlv(tlvString: string): Record<string, string> {
 
     let value = data.substring(index + 6, index + 6 + length);
 
-    // SECURITY: Immediately mask PAN in tag 007 (NCAR)
+    // SECURITY: Immediately mask card numbers in tag 007 (NCAR) and the DP receipt text
     if (tag === TLV_TAGS.NCAR) {
       value = maskCardNumber(value);
+    } else if (tag === TLV_TAGS.DP) {
+      value = maskReceiptBlock(value);
     }
 
     fields[tag] = value;
@@ -485,6 +493,38 @@ export function parseTlv(tlvString: string): Record<string, string> {
   }
 
   return fields;
+}
+
+/**
+ * Mask card numbers in the text (DP4, tag 033) of every line of a DP block.
+ * Digits are replaced one for one, so sub-tag headers and lengths are unchanged.
+ * Same walk as the native modules' PanMasker.
+ */
+function maskReceiptBlock(dpValue: string): string {
+  let out = '';
+  let index = 0;
+
+  while (index < dpValue.length) {
+    if (dpValue[index] === '*' || dpValue[index] === '?') {
+      out += dpValue[index];
+      index++;
+      continue;
+    }
+
+    const tag = dpValue.substring(index, index + 3);
+    const lengthStr = dpValue.substring(index + 3, index + 6);
+    const length = parseInt(lengthStr, 10);
+    if (index + 6 > dpValue.length || !/^\d{3}$/.test(lengthStr) || index + 6 + length > dpValue.length) {
+      // Not a sub-tag: mask what is left as plain text
+      return out + maskCardNumbersInText(dpValue.substring(index));
+    }
+
+    const value = dpValue.substring(index + 6, index + 6 + length);
+    out += tag + lengthStr + (tag === RECEIPT_TAGS.CONTENT ? maskCardNumbersInText(value) : value);
+    index += 6 + length;
+  }
+
+  return out;
 }
 
 /**

@@ -391,12 +391,21 @@ The merchant copy is the same with `Copie Commercant` as the last line. Void cop
 
 ## Card number masking
 
-Card numbers are masked to **first 6 + last 4 digits** (`516794******3315`) as soon as the
-terminal's reply is parsed. The full number is never exposed or logged by the SDK.
+Card numbers are masked to **first 6 + last 4 digits** (`516794******3315`). The full number is
+never exposed or logged by the SDK.
 
-This covers the card number field (NCAR, tag 007) and any card number in receipt text (13 to 19
-digits, written together or in groups separated by spaces or dashes). Only the digits are
-replaced, so the rest of the line stays exactly as sent. Both helpers are exported:
+Masking happens in the native module (Android and iOS), on the terminal's reply, before it is
+passed to JavaScript; the JavaScript layer masks again when it parses the reply.
+
+- **Card number field (NCAR, tag 007):** always returned as first 6 digits, `*`, last 4 digits
+  (`516794******3315`), whatever grouping it arrived in.
+- **Receipt text:** any run of 13 or more digits, where consecutive digits are adjacent or separated
+  by exactly one space, dash, dot, tab or non-breaking space, has every digit masked except the
+  first 6 and last 4 of the run (`5167 9400 0012 3315` → `5167 94** **** 3315`). Longer runs are
+  masked the same way. Separators and the line layout are kept. Dates and times, amounts, STAN,
+  terminal and authorisation numbers, and any run shorter than 13 digits are left as sent.
+
+Both helpers are exported:
 
 ```typescript
 import { maskCardNumber, maskCardNumbersInText } from 'react-native-tkpay-naps';

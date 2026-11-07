@@ -16,8 +16,13 @@ NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.
   - Lines with empty text are kept, and every `*`-separated group (or new DP1 line number) is its own line, so nothing is dropped or merged.
   - `settlement()` now returns the TM 110 receipt in `SettlementResult.receipt`.
 - **DP block dropped when it contained `?` or `!`.** `parseTlv` now only treats `!` / `?` as the end of the frame where a tag is expected; inside a value (a DP block ends with `?`, receipt text may contain `!`) they are data.
-- Card numbers are masked (first 6 + last 4 digits) wherever they appear: NCAR (tag 007) and receipt text, for 13 to 19 digits written together or grouped with spaces or dashes (was 16 contiguous digits only). Only digits are replaced, so separators and the rest of the line are kept. The full number is never exposed or logged.
+- Card numbers are masked (first 6 + last 4 digits) and the full number is never exposed or logged:
+  - **In the native modules.** Android (`PanMasker.kt`) and iOS (`PanMasker.swift`) mask the terminal's reply (tag 007 and the DP receipt text) before passing it to JavaScript, replacing digits one for one so TLV lengths are unchanged. `parseTlv` masks again (tag 007 and DP text) as a second layer.
+  - **Tag 007 (NCAR):** always first 6 digits, `*`, last 4 digits, whatever grouping it arrived in.
+  - **Receipt text:** every card-shaped run (13+ digits, consecutive digits adjacent or separated by exactly one space, dash, dot, tab or non-breaking space) has all digits masked except the first 6 and last 4 of the run, including runs over 19 digits. Separators and layout are kept; dates, times, amounts and shorter numbers are untouched. Was: 16 contiguous digits only.
+  - Shared test vectors in `test-fixtures/pan-vectors.json`, run by the JS tests, the Android JUnit test (`android/src/test`) and the iOS Swift test (`npm run test:native:ios`).
 - `test-protocol.js` no longer prints a raw frame or full test card numbers.
+- iOS: `testConnection` now bridges its CFStreams to `InputStream` / `OutputStream` (`as InputStream?`); it did not compile with the current Swift toolchain.
 - **Receipts parsed to their first line only.** `parseReceipt` now skips the `*` separator between print lines and the final `?` marker of a DP block (spec §5), so every line is returned. A `*` inside a line's text (e.g. a masked PAN) is kept.
 - **Refused payment confirmation reported as approved.** A TM=102 with CR ≠ 000 (e.g. 302 sale not found, 482 already cancelled — the terminal auto-reverses) now yields a failed `PaymentResult` with the decline receipt instead of `success: true`.
 

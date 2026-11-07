@@ -60,7 +60,7 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
                 val response = receiveResponse(timeout)
 
                 // Keep connection open for confirmation
-                promise.resolve(response)
+                promise.resolve(PanMasker.maskReply(response))
 
             } catch (e: Exception) {
                 closeConnection()
@@ -98,7 +98,7 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
                 // Close connection after confirmation
                 closeConnection()
 
-                promise.resolve(response)
+                promise.resolve(PanMasker.maskReply(response))
 
             } catch (e: Exception) {
                 closeConnection()

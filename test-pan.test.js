@@ -81,9 +81,30 @@ function reset() {
   replies = [];
 }
 
+const vectors = require('./test-fixtures/pan-vectors.json');
+
+test('shared rule: every text vector in test-fixtures/pan-vectors.json', () => {
+  for (const { input, expected } of vectors.text) {
+    assert.equal(maskCardNumbersInText(input), expected, JSON.stringify(input));
+  }
+});
+
+test('shared rule: tag 007 is first 6 + "*" + last 4 whatever the grouping', () => {
+  for (const { input, expected } of vectors.ncar) {
+    assert.equal(maskCardNumber(input), expected, JSON.stringify(input));
+    assert.equal(parseTlv(buildField('007', input))['007'], expected, `parseTlv ${JSON.stringify(input)}`);
+  }
+});
+
+test('JS second layer: a reply already masked by the native module parses to the same fields', () => {
+  for (const { input, expected } of vectors.nativeReply) {
+    assert.deepEqual(parseTlv(expected), parseTlv(input));
+  }
+});
+
 test('masking keeps 6 + 4 digits and the formatting, for 13-19 digits with spaces or dashes', () => {
   assert.equal(maskCardNumber(PAN), '516794******3315');
-  assert.equal(maskCardNumber(PAN_SPACED), '5167 94** **** 3315');
+  assert.equal(maskCardNumber(PAN_SPACED), '516794******3315');
   assert.equal(maskCardNumber('516794******3315'), '516794******3315', 'already masked stays as is');
   assert.equal(maskCardNumbersInText(`A ${PAN_SPACED} B`), 'A 5167 94** **** 3315 B');
   assert.equal(maskCardNumbersInText('A 5167-9400-0012-3315 B'), 'A 5167-94**-****-3315 B');
@@ -100,7 +121,7 @@ test('masking keeps 6 + 4 digits and the formatting, for 13-19 digits with space
 
 test('parseTlv masks NCAR (tag 007), including a spaced value', () => {
   assert.equal(parseTlv(buildField('007', PAN))['007'], '516794******3315');
-  assert.equal(parseTlv(buildField('007', PAN_SPACED))['007'], '5167 94** **** 3315');
+  assert.equal(parseTlv(buildField('007', PAN_SPACED))['007'], '516794******3315');
 });
 
 test('receipt lines: PANs masked, every line kept, content otherwise unchanged', () => {

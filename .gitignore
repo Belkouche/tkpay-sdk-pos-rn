@@ -57,3 +57,4 @@ coverage/
 # Environment
 .env
 .env.*
+native-tests/build/
