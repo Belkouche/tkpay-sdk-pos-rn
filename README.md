@@ -313,27 +313,79 @@ const reachable = await client.testConnection();
 
 ## Receipts
 
-The terminal sends receipts in the DP field (tag 010) as numbered lines with a format
-(normal or bold) and an alignment, separated by `*` (spec §5). The SDK parses them into `Receipt` objects:
+The receipt is the DP block (tag 010) the terminal sends: a CMI-certified layout that your app
+prints as received. The SDK parses **every** line, in order, and never adds, removes, merges or
+rewrites one. The only change it makes is masking a full card number if one ever appears in the
+text (see [Card number masking](#card-number-masking)).
+
+Each DP line has four sub-tags (spec §5): DP1 line number (030), DP2 format (031, `S` normal or
+`G` bold), DP3 alignment (032, `C` centre, `D` right, `G` left) and DP4 text (033). Lines are
+separated by `*` and `?` ends the block. They become:
 
 ```typescript
 interface Receipt {
-  type: ReceiptType;           // MERCHANT or CUSTOMER
-  lines: ReceiptLine[];        // { lineNumber, text, bold, alignment: LEFT | CENTER | RIGHT }
+  type: ReceiptType;    // MERCHANT or CUSTOMER
+  lines: ReceiptLine[]; // { lineNumber: "00", text: "TKpay", bold: true, alignment: CENTER }
 }
 ```
 
-`receiptToPlainText(receipt, width = 40)` renders one as text, with centring and right
-alignment applied, ready for a printer or a log.
+**Which copy comes from where**
 
-What the SDK changes in receipts:
-- The first centred line containing "naps" is replaced by a bold `TKPAY` line followed by `Powered by NAPS`.
-- On an approved payment, `STAN:`, `NCAI:` and `SEQ:` lines are added to the merchant receipt
-  (after the authorisation-code line).
-- Any 16-digit number in a line is masked (see below).
+| Operation | Result field | Comes from |
+|---|---|---|
+| `processPayment` | `merchantReceipt` ("Copie Commercant") | TM 101 |
+| `processPayment` | `customerReceipt` ("Copie Client") | TM 102 |
+| `processPayment` declined | `merchantReceipt` | decline receipt, as sent |
+| `cancelPayment` | `merchantReceipt` (ends "ANNULATION", "Copie Commercant") | TM 103, also kept on a pending void |
+| `cancelPayment` | `customerReceipt` (ends "ANNULATION", "Copie Client") | TM 104 |
+| `printDuplicate` | `merchantReceipt` | TM 108, as sent |
+| `totals` / `settlement` | `receipt` | TM 110, as sent |
+| `referencing` | `receipt` | TM 113, as sent |
 
-Where receipts come from: payment merchant copy = TM 101, customer copy = TM 102. Void merchant
-copy = TM 103, customer copy = TM 104. Declined payments return the decline receipt as `merchantReceipt`.
+**Printing a copy**
+
+`receiptToPlainText(receipt, width = 40)` renders the lines as text, applying centre and right
+alignment. For a printer that supports styles, use each line's `bold` and `alignment` instead.
+
+```typescript
+import { Alignment, receiptToPlainText, type Receipt } from 'react-native-tkpay-naps';
+
+async function printBothCopies() {
+  const payment = await client.processPayment({ amount: 10, registerId: '01', cashierId: '00001' });
+  if (payment.merchantReceipt) console.log(receiptToPlainText(payment.merchantReceipt)); // keep
+  if (payment.customerReceipt) console.log(receiptToPlainText(payment.customerReceipt)); // hand over
+}
+
+// Styled printing: one call per line with its own bold / alignment
+function printStyled(receipt: Receipt, printLine: (text: string, bold: boolean, align: Alignment) => void) {
+  for (const line of receipt.lines) printLine(line.text, line.bold, line.alignment);
+}
+```
+
+A 10.00 MAD payment on the emulator gives this customer copy (each line trimmed):
+
+```text
+TKpay
+--------------------------------
+07/11/2026 00:11:30
+TKPAY DEMO
+CASABLANCA
+--------------------------------
+VISA
+516794******3315
+Terminal: 00000001
+Transaction: 522544
+Autorisation: 517705
+STAN: 522544
+--------------------------------
+MONTANT: 10.00 MAD
+--------------------------------
+DEBIT
+Copie Client
+```
+
+The merchant copy is the same with `Copie Commercant` as the last line. Void copies have
+`ANNULATION` in place of `DEBIT`.
 
 ---
 
@@ -341,7 +393,7 @@ copy = TM 103, customer copy = TM 104. Declined payments return the decline rece
 
 The card number (NCAR, tag 007) is masked to **first 6 + last 4 digits** as soon as a response is
 parsed (`516794******3315`). The full PAN is never returned by the SDK. Receipt text goes through
-the same masking for any 16-digit number. Both helpers are exported:
+the same masking for any 13 to 19 digit number. Both helpers are exported:
 
 ```typescript
 import { maskCardNumber, maskCardNumbersInText } from 'react-native-tkpay-naps';

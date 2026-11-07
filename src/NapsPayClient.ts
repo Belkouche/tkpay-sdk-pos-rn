@@ -39,7 +39,6 @@ import {
   parseTlv,
   parseReceipt,
   maskCardNumber,
-  enhanceMerchantReceipt,
   describeResponseCode,
 } from './TlvProtocol';
 
@@ -245,12 +244,14 @@ export class NapsPayClient {
 
       const fields = parseTlv(response);
       const responseCode = fields[TLV_TAGS.CR] ?? '';
+      const dpValue = fields[TLV_TAGS.DP];
 
       return {
         success: responseCode === '000',
         responseCode,
         date: fields[TLV_TAGS.DA],
         time: fields[TLV_TAGS.HE],
+        receipt: dpValue ? parseReceipt(dpValue, ReceiptType.MERCHANT) : undefined,
         error: responseCode !== '000' ? `Settlement failed with code: ${responseCode}` : undefined,
       };
     } catch (error: unknown) {
@@ -633,10 +634,10 @@ export class NapsPayClient {
     paymentFields: Record<string, string>,
     fields: Record<string, string>
   ): PaymentResult {
-    // Parse receipts: Phase-1 DP is the merchant copy, Phase-2 DP the customer copy
+    // Receipts as sent: Phase-1 DP is the merchant copy, Phase-2 DP the customer copy
     const merchantDp = paymentFields[TLV_TAGS.DP];
     const customerDp = fields[TLV_TAGS.DP];
-    let merchantReceipt = merchantDp
+    const merchantReceipt = merchantDp
       ? parseReceipt(merchantDp, ReceiptType.MERCHANT)
       : undefined;
     const customerReceipt = customerDp
@@ -646,11 +647,6 @@ export class NapsPayClient {
     const stan = fields[TLV_TAGS.STAN] || '';
     const ncai = fields[TLV_TAGS.NCAI] || '';
     const sequence = fields[TLV_TAGS.NS] || '';
-
-    // Enhance merchant receipt with STAN, NCAI, and Sequence Number
-    if (merchantReceipt && stan) {
-      merchantReceipt = enhanceMerchantReceipt(merchantReceipt, stan, ncai, sequence);
-    }
 
     return {
       success: true,

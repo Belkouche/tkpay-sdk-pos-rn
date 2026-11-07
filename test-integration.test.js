@@ -22,7 +22,7 @@ const MODE = process.env.NAPS_EMULATOR_MODE || 'approve';
 
 // Node TCP stand-in for the native module (also stubs the gateway fetch)
 const { sent, closeSocket } = require('./example/quickstart/nodeTransport');
-const { NapsPayClient, parseTlv } = require('./lib');
+const { NapsPayClient, parseTlv, receiptToPlainText } = require('./lib');
 
 const client = new NapsPayClient({ host: HOST, port: PORT });
 
@@ -35,6 +35,34 @@ const forModes = (...modes) => ({ skip: !modes.includes(MODE) && `emulator mode 
 function assertFullReceipt(receipt, label) {
   assert.ok(receipt, `${label} present`);
   assert.ok(receipt.lines.length > 5, `${label}: ${receipt.lines.length} line(s) parsed`);
+}
+
+/** Golden emulator receipt (spec §5 layout); date, STAN and authorisation vary. */
+function assertGoldenReceipt(receipt, amount, label, copy) {
+  assert.ok(receipt, `${copy} present`);
+  const lines = receiptToPlainText(receipt).split('\n').map((l) => l.trim());
+  const expected = [
+    'TKpay',
+    '--------------------------------',
+    /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/,
+    'TKPAY DEMO',
+    'CASABLANCA',
+    '--------------------------------',
+    'VISA',
+    '516794******3315',
+    'Terminal: 00000001',
+    /^Transaction: \d{6}$/,
+    /^Autorisation: \d{6}$/,
+    /^STAN: \d{6}$/,
+    '--------------------------------',
+    `MONTANT: ${amount} MAD`,
+    '--------------------------------',
+    label,
+    copy,
+  ];
+  assert.equal(lines.length, expected.length, `${copy}: ${lines.length} lines\n${lines.join('\n')}`);
+  expected.forEach((e, i) =>
+    typeof e === 'string' ? assert.equal(lines[i], e, `${copy} line ${i + 1}`) : assert.match(lines[i], e, `${copy} line ${i + 1}`));
 }
 
 /** Approved payment to void; returns { stan, sequence }. */
@@ -50,6 +78,17 @@ async function payThenVoid() {
   const result = await client.cancelPayment(payment.stan, '01', '00001', payment.sequence, 1234);
   return { payment, result, tm003: parseTlv(sent[0] ?? ''), tm004: parseTlv(sent[1] ?? '') };
 }
+
+test('approve: payment and void give the golden merchant and customer copies', forModes('approve'), async () => {
+  const payment = await pay(10);
+  assertGoldenReceipt(payment.merchantReceipt, '10.00', 'DEBIT', 'Copie Commercant');
+  assertGoldenReceipt(payment.customerReceipt, '10.00', 'DEBIT', 'Copie Client');
+
+  const voided = await client.cancelPayment(payment.stan, '01', '00001', payment.sequence, 1000);
+  assert.equal(voided.success, true, voided.error);
+  assertGoldenReceipt(voided.merchantReceipt, '10.00', 'ANNULATION', 'Copie Commercant');
+  assertGoldenReceipt(voided.customerReceipt, '10.00', 'ANNULATION', 'Copie Client');
+});
 
 test('approve: payment, management ops and two-phase void', forModes('approve'), async () => {
   const payment = await pay();
@@ -86,7 +125,7 @@ test('decline: refused payment, no Phase 2', forModes('decline'), async () => {
   const p = await client.processPayment({ amount: 5, registerId: '01', cashierId: '00001' });
   assert.equal(p.success, false);
   assert.notEqual(p.responseCode, '000');
-  assert.ok(p.merchantReceipt);
+  assertFullReceipt(p.merchantReceipt, 'decline receipt');
   assert.equal(sent.length, 1);
 });
 

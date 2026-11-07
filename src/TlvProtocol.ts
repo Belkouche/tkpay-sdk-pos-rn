@@ -418,10 +418,10 @@ export function maskCardNumber(cardNumber: string): string {
 }
 
 /**
- * Mask any 16-digit card numbers in text
+ * Mask any card number (13-19 digits) in text
  */
 export function maskCardNumbersInText(text: string): string {
-  return text.replace(/\b\d{16}\b/g, (match) => maskCardNumber(match));
+  return text.replace(/\b\d{13,19}\b/g, (match) => maskCardNumber(match));
 }
 
 /**
@@ -430,15 +430,18 @@ export function maskCardNumbersInText(text: string): string {
 export function parseTlv(tlvString: string): Record<string, string> {
   const fields: Record<string, string> = {};
 
-  // Stop at the first end-of-message terminator ('!' v2, '?' v1) so any receipt
-  // content or noise after it is ignored. Both are accepted so the parser stays
-  // protocol-version agnostic even if the native layer did not strip them.
-  const termIndex = tlvString.search(/[!?]/);
-  const data = termIndex >= 0 ? tlvString.slice(0, termIndex) : tlvString;
+  // Values are length-delimited, so a '!' or '?' inside one (a DP block ends
+  // with '?', receipt text may contain '!') is data. The end-of-message
+  // terminator ('!' v2, '?' v1) only counts where a tag is expected; anything
+  // after it is ignored. Both are accepted so the parser stays protocol-version
+  // agnostic even if the native layer did not strip them.
+  const data = tlvString;
 
   let index = 0;
 
   while (index < data.length) {
+    if (data[index] === '!' || data[index] === '?') break;
+
     // Need at least 6 chars for tag + length
     if (index + 6 > data.length) break;
 
@@ -477,14 +480,28 @@ export function parseTlv(tlvString: string): Record<string, string> {
 export function parseReceipt(dpValue: string, type: ReceiptType): Receipt {
   const lines: ReceiptLine[] = [];
   let index = 0;
+  let open = false;
   let lineNumber = '';
   let format = 'S';
   let alignment = 'G';
   let content = '';
 
+  // Every line is kept as sent, even with empty text
+  const flush = () => {
+    if (open) {
+      lines.push(createReceiptLine(lineNumber, content, format, alignment));
+    }
+    open = false;
+    lineNumber = '';
+    format = 'S';
+    alignment = 'G';
+    content = '';
+  };
+
   while (index < dpValue.length) {
-    // Skip the line separator '*' and the end-of-lines marker '?' between groups
+    // '*' separates print lines, '?' ends the block
     if (dpValue[index] === '*' || dpValue[index] === '?') {
+      flush();
       index++;
       continue;
     }
@@ -504,14 +521,9 @@ export function parseReceipt(dpValue: string, type: ReceiptType): Receipt {
 
     switch (tag) {
       case RECEIPT_TAGS.LINE_NUMBER:
-        // New line starting - save previous if exists
-        if (lineNumber && content) {
-          lines.push(createReceiptLine(lineNumber, content, format, alignment));
-        }
+        // A line number without a separator still starts a new line
+        flush();
         lineNumber = value;
-        format = 'S';
-        alignment = 'G';
-        content = '';
         break;
       case RECEIPT_TAGS.FORMAT:
         format = value;
@@ -523,20 +535,16 @@ export function parseReceipt(dpValue: string, type: ReceiptType): Receipt {
         content = value;
         break;
     }
+    open = true;
 
     index += 6 + length;
   }
 
   // Don't forget the last line
-  if (lineNumber && content) {
-    lines.push(createReceiptLine(lineNumber, content, format, alignment));
-  }
-
-  // Apply TKPAY branding
-  const brandedLines = applyBranding(lines);
+  flush();
 
   // Mask any card numbers in receipt
-  const maskedLines = brandedLines.map((line) => ({
+  const maskedLines = lines.map((line) => ({
     ...line,
     text: maskCardNumbersInText(line.text),
   }));
@@ -570,96 +578,6 @@ function createReceiptLine(
   }
 
   return { lineNumber, text: content, bold, alignment };
-}
-
-/**
- * Apply TKPAY branding to receipt
- */
-function applyBranding(lines: ReceiptLine[]): ReceiptLine[] {
-  const result: ReceiptLine[] = [];
-  let brandingApplied = false;
-
-  for (const line of lines) {
-    if (
-      !brandingApplied &&
-      line.text.toLowerCase().includes('naps') &&
-      line.alignment === Alignment.CENTER
-    ) {
-      // Replace with TKPAY header
-      result.push({
-        lineNumber: line.lineNumber,
-        text: 'TKPAY',
-        bold: true,
-        alignment: Alignment.CENTER,
-      });
-
-      // Add "Powered by NAPS" below
-      const nextLineNum = (parseInt(line.lineNumber, 10) + 1)
-        .toString()
-        .padStart(2, '0');
-      result.push({
-        lineNumber: nextLineNum,
-        text: 'Powered by NAPS',
-        bold: false,
-        alignment: Alignment.CENTER,
-      });
-
-      brandingApplied = true;
-    } else {
-      result.push(line);
-    }
-  }
-
-  return result;
-}
-
-/**
- * Enhance merchant receipt with STAN, NCAI, and Sequence Number
- */
-export function enhanceMerchantReceipt(
-  receipt: Receipt,
-  stan: string,
-  ncai: string,
-  sequence: string
-): Receipt {
-  const lines = [...receipt.lines];
-
-  // Find the line with "CODE AUTORISATION" or "APPROUVEE" to insert after
-  let insertIndex = lines.length;
-  for (let i = 0; i < lines.length; i++) {
-    const text = lines[i].text.toUpperCase();
-    if (text.includes('CODE AUTORISATION') || text.includes('AUTH')) {
-      insertIndex = i + 1;
-      break;
-    }
-  }
-
-  // Create new lines for STAN, NCAI, SEQ
-  const newLines: ReceiptLine[] = [
-    {
-      lineNumber: '90',
-      text: `STAN: ${stan}`,
-      bold: false,
-      alignment: Alignment.LEFT,
-    },
-    {
-      lineNumber: '91',
-      text: `NCAI: ${ncai}`,
-      bold: false,
-      alignment: Alignment.LEFT,
-    },
-    {
-      lineNumber: '92',
-      text: `SEQ: ${sequence}`,
-      bold: false,
-      alignment: Alignment.LEFT,
-    },
-  ];
-
-  // Insert the new lines
-  lines.splice(insertIndex, 0, ...newLines);
-
-  return { type: receipt.type, lines };
 }
 
 /**

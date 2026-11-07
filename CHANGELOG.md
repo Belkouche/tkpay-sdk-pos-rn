@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.4.4 emulator (two-phase void, `confirm_error` mode).
 
 ### Fixed
+- **Receipts are now exactly what the terminal sends (spec §5).**
+  - Removed the SDK branding that replaced the first centred line containing "naps" with `TKPAY` and inserted a `Powered by NAPS` line.
+  - The payment merchant copy no longer gets `STAN:` / `NCAI:` / `SEQ:` lines added (`enhanceMerchantReceipt` removed).
+  - Lines with empty text are kept, and every `*`-separated group (or new DP1 line number) is its own line, so nothing is dropped or merged.
+  - `settlement()` now returns the TM 110 receipt in `SettlementResult.receipt`.
+- **DP block dropped when it contained `?` or `!`.** `parseTlv` now only treats `!` / `?` as the end of the frame where a tag is expected; inside a value (a DP block ends with `?`, receipt text may contain `!`) they are data.
+- Card numbers in receipt text are masked for 13 to 19 digits (was 16 only).
 - **Receipts parsed to their first line only.** `parseReceipt` now skips the `*` separator between print lines and the final `?` marker of a DP block (spec §5), so every line is returned. A `*` inside a line's text (e.g. a masked PAN) is kept.
 - **Refused payment confirmation reported as approved.** A TM=102 with CR ≠ 000 (e.g. 302 sale not found, 482 already cancelled — the terminal auto-reverses) now yields a failed `PaymentResult` with the decline receipt instead of `success: true`.
 
@@ -17,6 +24,7 @@ NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.
 - `CancellationResult.merchantReceipt` (DP of TM=103) and `CancellationResult.customerReceipt` (DP of TM=104).
 - `MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE` (`'104'`); `CANCELLATION_CORRECTION` is kept as a deprecated alias.
 - Response codes 265, 281, 385, 400, 500 and 888 from the NapsPay ISO table.
+- Receipt tests `test-receipts.test.js` with raw emulator frames (`test-fixtures/emulator-receipts.json`), asserting the exact merchant and customer copies for payment and void.
 - Runnable Node quickstart `example/quickstart/quickstart.js` (same code as the README quickstart) and `example/quickstart/nodeTransport.js`, a Node TCP stand-in for the native module.
 - Emulator integration tests `test-integration.test.js`, selected by mode: `NAPS_PORT=4456 NAPS_EMULATOR_MODE=<mode> npm run test:integration` against `naps_emulator.py --port 4456 --mode <mode>`. Covers approve, decline, confirm_error, void_480, void_995, void_no_confirm and void_refuse.
 

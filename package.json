@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test test-protocol-v2.test.js test-napspay-544.test.js",
+    "test": "npm run build && node --test test-protocol-v2.test.js test-napspay-544.test.js test-receipts.test.js",
     "clean": "rm -rf lib",
     "test:integration": "npm run build && node --test --test-timeout=60000 test-integration.test.js"
   },
