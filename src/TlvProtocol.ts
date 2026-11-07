@@ -403,25 +403,41 @@ export function buildReferencingRequest(
 
 /**
  * Mask card number to show only first 6 and last 4 digits
- * Example: 5167940123453315 -> 516794******3315
+ * Digits are counted, so spaces or dashes are kept in place.
+ * Example: 5167940123453315 -> 516794******3315, 5167 9401 2345 3315 -> 5167 94** **** 3315
  */
 export function maskCardNumber(cardNumber: string): string {
-  if (!cardNumber || cardNumber.length < 10) {
+  if (!cardNumber) {
     return cardNumber;
   }
 
-  const first6 = cardNumber.substring(0, 6);
-  const last4 = cardNumber.substring(cardNumber.length - 4);
-  const masked = '*'.repeat(cardNumber.length - 10);
+  const digitCount = cardNumber.replace(/\D/g, '').length;
+  if (digitCount < 10) {
+    return cardNumber;
+  }
 
-  return `${first6}${masked}${last4}`;
+  let digitIndex = 0;
+  return cardNumber.replace(/\d/g, (digit) => {
+    const i = digitIndex++;
+    return i < 6 || i >= digitCount - 4 ? digit : '*';
+  });
 }
 
 /**
- * Mask any card number (13-19 digits) in text
+ * Card numbers in text: 13-19 digits written together, in groups of 4
+ * (4-4-4-4, 4-4-4-4-3, …) or as 4-6-5, separated by spaces or dashes.
+ */
+const CARD_NUMBER_IN_TEXT =
+  /\b(?:\d{4}(?:[ -]\d{4}){2,3}(?:[ -]\d{1,4})?|\d{4}[ -]\d{6}[ -]\d{4,5}|\d{13,19})\b/g;
+
+/**
+ * Mask any card number (13-19 digits, optionally with spaces or dashes) in text
  */
 export function maskCardNumbersInText(text: string): string {
-  return text.replace(/\b\d{13,19}\b/g, (match) => maskCardNumber(match));
+  return text.replace(CARD_NUMBER_IN_TEXT, (match) => {
+    const digitCount = match.replace(/\D/g, '').length;
+    return digitCount >= 13 && digitCount <= 19 ? maskCardNumber(match) : match;
+  });
 }
 
 /**

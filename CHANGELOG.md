@@ -16,7 +16,8 @@ NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.
   - Lines with empty text are kept, and every `*`-separated group (or new DP1 line number) is its own line, so nothing is dropped or merged.
   - `settlement()` now returns the TM 110 receipt in `SettlementResult.receipt`.
 - **DP block dropped when it contained `?` or `!`.** `parseTlv` now only treats `!` / `?` as the end of the frame where a tag is expected; inside a value (a DP block ends with `?`, receipt text may contain `!`) they are data.
-- Card numbers in receipt text are masked for 13 to 19 digits (was 16 only).
+- Card numbers are masked (first 6 + last 4 digits) wherever they appear: NCAR (tag 007) and receipt text, for 13 to 19 digits written together or grouped with spaces or dashes (was 16 contiguous digits only). Only digits are replaced, so separators and the rest of the line are kept. The full number is never exposed or logged.
+- `test-protocol.js` no longer prints a raw frame or full test card numbers.
 - **Receipts parsed to their first line only.** `parseReceipt` now skips the `*` separator between print lines and the final `?` marker of a DP block (spec §5), so every line is returned. A `*` inside a line's text (e.g. a masked PAN) is kept.
 - **Refused payment confirmation reported as approved.** A TM=102 with CR ≠ 000 (e.g. 302 sale not found, 482 already cancelled — the terminal auto-reverses) now yields a failed `PaymentResult` with the decline receipt instead of `success: true`.
 
@@ -24,6 +25,7 @@ NapsPay v5.4.4 sync with the canonical C# SDK (v1.5.0), verified against the v5.
 - `CancellationResult.merchantReceipt` (DP of TM=103) and `CancellationResult.customerReceipt` (DP of TM=104).
 - `MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE` (`'104'`); `CANCELLATION_CORRECTION` is kept as a deprecated alias.
 - Response codes 265, 281, 385, 400, 500 and 888 from the NapsPay ISO table.
+- Card number tests `test-pan.test.js`: a reply with a full PAN in tag 007 and spaced / 19-digit numbers in receipt lines leaves no full number in results, receipts, request frames, errors, the gateway notification or captured console output.
 - Receipt tests `test-receipts.test.js` with raw emulator frames (`test-fixtures/emulator-receipts.json`), asserting the exact merchant and customer copies for payment and void.
 - Runnable Node quickstart `example/quickstart/quickstart.js` (same code as the README quickstart) and `example/quickstart/nodeTransport.js`, a Node TCP stand-in for the native module.
 - Emulator integration tests `test-integration.test.js`, selected by mode: `NAPS_PORT=4456 NAPS_EMULATOR_MODE=<mode> npm run test:integration` against `naps_emulator.py --port 4456 --mode <mode>`. Covers approve, decline, confirm_error, void_480, void_995, void_no_confirm and void_refuse.

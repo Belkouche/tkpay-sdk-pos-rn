@@ -391,15 +391,18 @@ The merchant copy is the same with `Copie Commercant` as the last line. Void cop
 
 ## Card number masking
 
-The card number (NCAR, tag 007) is masked to **first 6 + last 4 digits** as soon as a response is
-parsed (`516794******3315`). The full PAN is never returned by the SDK. Receipt text goes through
-the same masking for any 13 to 19 digit number. Both helpers are exported:
+Card numbers are masked to **first 6 + last 4 digits** (`516794******3315`) as soon as the
+terminal's reply is parsed. The full number is never exposed or logged by the SDK.
+
+This covers the card number field (NCAR, tag 007) and any card number in receipt text (13 to 19
+digits, written together or in groups separated by spaces or dashes). Only the digits are
+replaced, so the rest of the line stays exactly as sent. Both helpers are exported:
 
 ```typescript
 import { maskCardNumber, maskCardNumbersInText } from 'react-native-tkpay-naps';
 
-maskCardNumber('5167940123453315');                // "516794******3315"
-maskCardNumbersInText('CARTE 5167940123453315');   // "CARTE 516794******3315"
+maskCardNumber('5167940123453315');                     // "516794******3315"
+maskCardNumbersInText('CARTE 5167 9401 2345 3315');     // "CARTE 5167 94** **** 3315"
 ```
 
 ---

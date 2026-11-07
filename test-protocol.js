@@ -34,7 +34,7 @@ console.log('   Length:', confirmRequest.length, 'chars\n');
 console.log('3. Testing parseTlv()');
 const sampleResponse = '001003101008006123456007016516794012345331513003000';
 const parsed = parseTlv(sampleResponse);
-console.log('   Input:', sampleResponse);
+// The raw frame carries the full card number in tag 007: print only the parsed (masked) fields
 console.log('   Parsed fields:');
 for (const [tag, value] of Object.entries(parsed)) {
   console.log(`     Tag ${tag}: "${value}"`);
@@ -50,7 +50,7 @@ const testCards = [
   '123456'
 ];
 for (const card of testCards) {
-  console.log(`   ${card} -> ${maskCardNumber(card)}`);
+  console.log(`   ${card.length} digits -> ${maskCardNumber(card)}`); // never print the full number
 }
 console.log('');
 
