@@ -89,6 +89,9 @@ test('masking keeps 6 + 4 digits and the formatting, for 13-19 digits with space
   assert.equal(maskCardNumbersInText('A 5167-9400-0012-3315 B'), 'A 5167-94**-****-3315 B');
   assert.equal(maskCardNumbersInText('AMEX 3782 822463 10005'), 'AMEX 3782 82**** *0005');
   assert.equal(maskCardNumbersInText(`R ${PAN_19}`), 'R 400012*********0123');
+  // More than 19 digits fails closed: still masked (first 6 + last 4 of the run)
+  assert.equal(maskCardNumbersInText(`X ${PAN_SPACED} 0000 Y`), 'X 5167 94** **** **** 0000 Y');
+  assert.equal(maskCardNumbersInText(`X ${PAN}00001111 Y`), 'X 516794**************1111 Y');
   // Not card numbers: left untouched
   for (const s of ['07/11/2026 00:11:30', 'Terminal: 00000001', 'MONTANT: 10.00 MAD', 'Tel 0522 12 34 56']) {
     assert.equal(maskCardNumbersInText(s), s);

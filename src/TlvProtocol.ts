@@ -424,20 +424,21 @@ export function maskCardNumber(cardNumber: string): string {
 }
 
 /**
- * Card numbers in text: 13-19 digits written together, in groups of 4
+ * Card numbers in text: 13+ digits written together, in groups of 4
  * (4-4-4-4, 4-4-4-4-3, …) or as 4-6-5, separated by spaces or dashes.
+ * Longer runs match too, so a card number followed by more digits is still masked.
  */
 const CARD_NUMBER_IN_TEXT =
-  /\b(?:\d{4}(?:[ -]\d{4}){2,3}(?:[ -]\d{1,4})?|\d{4}[ -]\d{6}[ -]\d{4,5}|\d{13,19})\b/g;
+  /\b(?:\d{4}(?:[ -]\d{4}){2,}(?:[ -]\d{1,4})?|\d{4}[ -]\d{6}[ -]\d{4,5}|\d{13,})\b/g;
 
 /**
- * Mask any card number (13-19 digits, optionally with spaces or dashes) in text
+ * Mask any card number (13-19 digits, optionally with spaces or dashes) in text.
+ * Fails closed: a run of more than 19 digits is masked as well.
  */
 export function maskCardNumbersInText(text: string): string {
-  return text.replace(CARD_NUMBER_IN_TEXT, (match) => {
-    const digitCount = match.replace(/\D/g, '').length;
-    return digitCount >= 13 && digitCount <= 19 ? maskCardNumber(match) : match;
-  });
+  return text.replace(CARD_NUMBER_IN_TEXT, (match) =>
+    match.replace(/\D/g, '').length >= 13 ? maskCardNumber(match) : match
+  );
 }
 
 /**
