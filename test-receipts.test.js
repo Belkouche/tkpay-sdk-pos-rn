@@ -29,8 +29,6 @@ Module._load = function (request, ...rest) {
   }
   return originalLoad.call(this, request, ...rest);
 };
-global.fetch = async () => ({ ok: true });
-
 const {
   buildField,
   parseTlv,

@@ -7,8 +7,7 @@
  * it. A response ends at the '!' / '?' terminator or after 1 s of silence, and
  * is decoded as UTF-8 like the native modules.
  *
- * Requiring this file installs it as `react-native` and stubs `fetch`, so the
- * fire-and-forget gateway notification is not sent from a Node run.
+ * Requiring this file installs it as `react-native`.
  */
 
 const net = require('net');
@@ -99,6 +98,4 @@ Module._load = function (request, ...rest) {
   }
   return originalLoad.call(this, request, ...rest);
 };
-global.fetch = async () => ({ ok: true });
-
 module.exports = { sent, closeSocket };

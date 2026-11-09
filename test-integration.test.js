@@ -20,7 +20,7 @@ const HOST = process.env.NAPS_HOST || '127.0.0.1';
 const PORT = parseInt(process.env.NAPS_PORT || '4444', 10);
 const MODE = process.env.NAPS_EMULATOR_MODE || 'approve';
 
-// Node TCP stand-in for the native module (also stubs the gateway fetch)
+// Node TCP stand-in for the native module
 const { sent, closeSocket } = require('./example/quickstart/nodeTransport');
 const { NapsPayClient, parseTlv, receiptToPlainText } = require('./lib');
 

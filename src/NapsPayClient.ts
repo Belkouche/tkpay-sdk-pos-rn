@@ -24,7 +24,6 @@ import {
   NapsError,
   ErrorCode,
 } from './types';
-import { notifyTransaction } from './GatewayNotifier';
 import {
   buildPaymentRequest,
   buildConfirmationRequest,
@@ -155,10 +154,7 @@ export class NapsPayClient {
       }
 
       if (responseCode !== '000') {
-        const result = this.buildFailedResult(responseCode, paymentFields);
-        // Send notification to gateway
-        notifyTransaction(this.config.host, request, result);
-        return result;
+        return this.buildFailedResult(responseCode, paymentFields);
       }
 
       // Get STAN for confirmation
@@ -187,18 +183,11 @@ export class NapsPayClient {
       // 482 = already cancelled (the terminal auto-reverses). Not an approval.
       const confirmCode = confirmFields[TLV_TAGS.CR];
       if (confirmCode !== undefined && confirmCode !== '000') {
-        const result = this.buildFailedResult(confirmCode, confirmFields);
-        notifyTransaction(this.config.host, request, result);
-        return result;
+        return this.buildFailedResult(confirmCode, confirmFields);
       }
 
       // Build successful result — merchant copy from Phase 1, customer copy from Phase 2
-      const result = this.buildSuccessResult(paymentFields, confirmFields);
-
-      // Send notification to gateway
-      notifyTransaction(this.config.host, request, result);
-
-      return result;
+      return this.buildSuccessResult(paymentFields, confirmFields);
     } catch (error: unknown) {
       if (error instanceof NapsError) {
         throw error;

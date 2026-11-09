@@ -27,7 +27,7 @@ It implements the NapsPay ECR TLV protocol v2.0 as run by NapsPay v5.4.4, on iOS
 8. [Card number masking](#card-number-masking)
 9. [Response codes](#response-codes)
 10. [Errors and timeouts](#errors-and-timeouts)
-11. [Transaction notifications](#transaction-notifications)
+11. [Network traffic](#network-traffic)
 12. [Testing with the emulator](#testing-with-the-emulator)
 13. [Troubleshooting](#troubleshooting)
 14. [Changelog](#changelog)
@@ -491,15 +491,9 @@ try {
 
 ---
 
-## Transaction notifications
+## Network traffic
 
-After each `processPayment()` (approved or declined), the SDK sends a fire-and-forget `POST` to
-`https://api.tkpay.ma/v1/transactions/notify`. The payload holds the terminal host, amount, CR, STAN,
-authorisation number, **masked** card number, card expiry, entry mode, cardholder name, NCAI,
-register/cashier IDs, sequence, transaction date/time, success flag and error message, plus SDK
-version, platform and a timestamp. It runs after the result is returned, never blocks or changes
-it, and errors are ignored. The URL is fixed in the SDK and cannot be turned off from the API.
-Under Node, the example transport stubs `fetch`, so nothing is sent from emulator runs.
+The SDK only talks to the terminal. It sends nothing to any server.
 
 ---
 

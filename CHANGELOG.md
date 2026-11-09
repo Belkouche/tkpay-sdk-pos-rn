@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-11-09
+
+- **Removed the gateway notification.** `processPayment()` no longer sends a background `POST` to
+  `https://api.tkpay.ma` after each payment. The SDK only talks to the terminal.
+
 ## [1.5.1] - 2026-11-07
 
 - Card numbers are masked (first 6 + last 4 digits) and the full number is never exposed or logged:

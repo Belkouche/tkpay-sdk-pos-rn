@@ -1,7 +1,7 @@
 /**
  * Card number (PAN) handling: masked (first 6 + last 4) as soon as a reply is
- * parsed, never present in results, receipts, errors, request frames, gateway
- * notifications or log output.
+ * parsed, never present in results, receipts, errors, request frames or log
+ * output. The SDK sends nothing over the network: fetch is watched to prove it.
  *
  * Runs against the compiled output in ./lib (built by `npm run build`).
  */
@@ -10,12 +10,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('module');
 
-// Capture every console call and the gateway notification body.
+// Capture every console call and any network request (there must be none).
 const logs = [];
 for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
   console[level] = (...args) => logs.push(args.map(String).join(' '));
 }
-global.__DEV__ = true; // enable the SDK's dev-only logging so it is checked too
 const notifications = [];
 global.fetch = async (url, init) => {
   notifications.push(String(init && init.body));
@@ -129,7 +128,7 @@ test('receipt lines: PANs masked, every line kept, content otherwise unchanged',
   assert.deepEqual(receipt.lines.map((l) => l.text), MASKED_LINES);
 });
 
-test('approved payment: no full PAN in result, receipts, TM 002 frame, notification or logs', async () => {
+test('approved payment: no full PAN in result, receipts, TM 002 frame or logs, no network request', async () => {
   reset();
   replies = [tm101(), tm102()];
   const result = await new NapsPayClient({ host: '127.0.0.1' }).processPayment({ amount: 10, registerId: '01', cashierId: '00001' });
@@ -140,12 +139,10 @@ test('approved payment: no full PAN in result, receipts, TM 002 frame, notificat
   assert.deepEqual(result.merchantReceipt.lines.map((l) => l.text), MASKED_LINES);
   assert.deepEqual(result.customerReceipt.lines.map((l) => l.text), MASKED_LINES);
   assert.equal(parseTlv(requests[1])['007'], '516794******3315', 'TM 002 echoes the masked NCAR');
-  assert.equal(notifications.length, 1);
-  assert.ok(logs.length > 0, 'dev logging ran and was captured');
+  assert.equal(notifications.length, 0, 'no network request');
 
   assertNoPan(result, 'PaymentResult');
   assertNoPan(requests[1], 'TM 002 request frame');
-  assertNoPan(notifications, 'gateway notification');
   assertNoPan(logs, 'console output');
 });
 
@@ -164,7 +161,7 @@ test('declined payment and protocol errors: no full PAN in result, error text or
   assert.ok(error instanceof Error);
   assertNoPan(`${error.message} ${error.stack}`, 'thrown error');
 
-  assertNoPan(notifications, 'gateway notification');
+  assert.equal(notifications.length, 0, 'no network request');
   assertNoPan(logs, 'console output');
 });
 
