@@ -31,7 +31,8 @@ enum TlvFraming {
     /// End index (exclusive) of the field starting at `pos`, or -1 if its header is not 3 + 3
     /// ASCII digits. Can be past `units.count` when the field is not fully received yet. A DP
     /// (010) declared 999 long ends at its own '?' end marker, found by walking its sub-records
-    /// (3-digit sub-tag + 3-digit length + value) and '*' line separators; the value includes it.
+    /// (receipt sub-tag 030-039 + 3-digit length + value) and '*' line separators; the value
+    /// includes it. Any other sub-record ends the walk at the declared length.
     static func fieldEnd(_ units: [UInt16], _ pos: Int) -> Int {
         guard let tag = number(units, pos, 3), let length = number(units, pos + 3, 3) else { return -1 }
         let declaredEnd = pos + 6 + length
@@ -44,7 +45,10 @@ enum TlvFraming {
             }
             if units[i] == question { return max(i + 1, declaredEnd) }
             if i + 6 > units.count { return units.count + 1 } // rest of the receipt not received yet
-            guard number(units, i, 3) != nil, let subLength = number(units, i + 3, 3) else { return declaredEnd }
+            // Only receipt sub-tags (030-039): anything else (e.g. a top-level 013 or 007 after
+            // a DP that really is 999 long, with no '?') is not part of the DP.
+            guard let subTag = number(units, i, 3), (30...39).contains(subTag),
+                  let subLength = number(units, i + 3, 3) else { return declaredEnd }
             i += 6 + subLength
         }
         return units.count + 1

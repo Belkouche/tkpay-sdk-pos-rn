@@ -74,5 +74,21 @@ for bad in ["\u{0660}\u{0660}\u{0661}003101", "001\u{FF10}\u{FF10}\u{FF11}1", "0
     _ = PanMasker.maskReply(bad)
 }
 
+// DP declared 999, exactly 999 chars of sub-records and no '?': stops at the top-level 013
+let exact999 = line(1, String(repeating: "Y", count: 999 - 28))
+let guardFrame = field("001", "101") + "010999" + exact999 + "013003000" + "007016" + "5167940000123315" + "!"
+frameCheck(exact999.utf16.count == 999, "999-char receipt")
+frameCheck(TlvFraming.fieldEnd(Array(guardFrame.utf16), 9) == 9 + 6 + 999, "DP 999 without '?' ends at the declared length")
+let guardMasked = PanMasker.maskReply(guardFrame)
+frameCheck(guardMasked.contains("007016516794******3315"), "tag 007 after a 999-long DP is masked as its own field")
+frameCheck(guardMasked.contains("013003000"), "CR after a 999-long DP kept as its own field")
+
+// Every DP sub-tag value and the unparseable rest are masked, not only 033
+let pan = "5167940000123315"
+let anyTagDp = field("030", pan) + field("031", "S") + field("034", "REF \(pan)") + "*" + "TEXTE \(pan)"
+let anyTagMasked = PanMasker.maskReply(head + field("010", anyTagDp) + "!")
+frameCheck(!anyTagMasked.contains(pan), "PAN masked in every DP sub-tag value and the rest")
+frameCheck(anyTagMasked.utf16.count == (head + field("010", anyTagDp) + "!").utf16.count, "masking keeps the length")
+
 print("\(text.count) text + \(replies.count) reply vectors, \(framingChecks) framing checks, \(failures) failure(s)")
 exit(failures == 0 ? 0 : 1)

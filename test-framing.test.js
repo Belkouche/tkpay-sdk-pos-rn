@@ -119,3 +119,26 @@ test('only ASCII digits 0-9 are TLV digits; malformed input never throws', () =>
   const receipt = parseReceipt(line(1, 'OK') + '*030' + fullwidth + '01', ReceiptType.MERCHANT);
   assert.deepEqual(receipt.lines.map((l) => l.text), ['OK']);
 });
+
+test('DP declared 999 with no "?" stops at the first non-receipt sub-tag (030-039 only)', () => {
+  const dp = line(1, 'Y'.repeat(999 - 28)); // exactly 999 chars of sub-records, no '?'
+  assert.equal(dp.length, 999);
+  const pan = '5167940000123315';
+  const frame = buildField('001', '101') + '010999' + dp + '013003000' + '007016' + pan + '!';
+  assert.equal(fieldEnd(frame, 9), 9 + 6 + 999, 'declared end');
+  const fields = parseTlv(frame);
+  assert.equal(fields['010'], dp, 'DP = the declared 999 chars');
+  assert.equal(fields['013'], '000', 'CR is its own field');
+  assert.equal(fields['007'], '516794******3315', 'card number is its own field, masked');
+  assert.equal(isCompleteMessage(frame), true);
+});
+
+test('DP masking covers every sub-tag value and an unparseable remainder, not only 033', () => {
+  const pan = '5167940000123315';
+  const dp = buildField('030', pan) + buildField('031', 'S') + buildField('032', 'G') + buildField('033', 'OK') +
+    buildField('034', `REF ${pan}`) + '*' + `TEXTE LIBRE ${pan}`;
+  const masked = parseTlv(head + buildField('010', dp) + '!')['010'];
+  assert.equal(masked.length, dp.length, 'lengths unchanged');
+  assert.ok(!masked.includes(pan), masked);
+  assert.equal((masked.match(/516794\*{6}3315/g) || []).length, 3);
+});

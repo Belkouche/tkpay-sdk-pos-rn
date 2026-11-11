@@ -4,7 +4,7 @@ package ma.tkpay.naps
  * Masks card numbers in a raw terminal reply before it crosses the bridge to JS.
  *
  * - Tag 007 (NCAR): every digit except the first 6 and last 4 becomes '*'.
- * - Tag 010 (DP): in each line's text (sub-tag 033), every card-shaped run is
+ * - Tag 010 (DP): in every sub-tag value (and any unparseable rest), every card-shaped run is
  *   masked the same way. A card-shaped run is 13+ digits where consecutive
  *   digits are adjacent or separated by exactly one space, dash, dot, tab or
  *   non-breaking space; runs over 19 digits are masked too.
@@ -15,7 +15,6 @@ package ma.tkpay.naps
 internal object PanMasker {
     private const val TAG_NCAR = "007"
     private const val TAG_DP = "010"
-    private const val TAG_CONTENT = "033"
     private const val MIN_RUN_DIGITS = 13
 
     fun maskReply(reply: String): String {
@@ -58,7 +57,7 @@ internal object PanMasker {
                 maskRuns(out, i, end)
                 return
             }
-            if (out.substring(i, i + 3) == TAG_CONTENT) maskRuns(out, i + 6, valueEnd)
+            maskRuns(out, i + 6, valueEnd)
             i = valueEnd
         }
     }

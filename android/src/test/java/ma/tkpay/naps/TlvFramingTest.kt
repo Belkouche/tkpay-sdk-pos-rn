@@ -54,6 +54,27 @@ class TlvFramingTest {
     }
 
     @Test
+    fun dpDeclared999WithoutEndMarkerStopsAtTheFirstNonReceiptSubTag() {
+        val exact = line(1, "Y".repeat(999 - 28))
+        assertEquals(999, exact.length)
+        val reply = field("001", "101") + "010999" + exact + "013003000" + "007016" + "5167940000123315" + "!"
+        assertEquals(9 + 6 + 999, TlvFraming.fieldEnd(reply, 9))
+        val masked = PanMasker.maskReply(reply)
+        assertTrue(masked.contains("007016516794******3315"))
+        assertTrue(masked.contains("013003000"))
+    }
+
+    @Test
+    fun everyDpSubTagValueAndTheRestAreMasked() {
+        val pan = "5167940000123315"
+        val dp = field("030", pan) + field("031", "S") + field("034", "REF $pan") + "*" + "TEXTE $pan"
+        val reply = head + field("010", dp) + "!"
+        val masked = PanMasker.maskReply(reply)
+        assertFalse(masked.contains(pan))
+        assertEquals(reply.length, masked.length)
+    }
+
+    @Test
     fun onlyAsciiDigitsAndNeverThrows() {
         assertEquals(-1, TlvFraming.fieldEnd("٠٠١003101", 0))
         assertEquals(-1, TlvFraming.fieldEnd("001００１1", 0))

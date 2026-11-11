@@ -29,7 +29,8 @@ internal object TlvFraming {
      * End index (exclusive) of the field starting at [pos], or -1 if its header is not 3 + 3
      * ASCII digits. Can be past data.length when the field is not fully received yet. A DP (010)
      * declared 999 long ends at its own '?' end marker, found by walking its sub-records
-     * (3-digit sub-tag + 3-digit length + value) and '*' line separators; the value includes it.
+     * (receipt sub-tag 030-039 + 3-digit length + value) and '*' line separators; the value
+     * includes it. Any other sub-record ends the walk at the declared length.
      */
     fun fieldEnd(data: String, pos: Int): Int {
         val tag = number(data, pos, 3)
@@ -46,7 +47,10 @@ internal object TlvFraming {
             if (data[i] == '?') return maxOf(i + 1, declaredEnd)
             if (i + 6 > data.length) return data.length + 1 // rest of the receipt not received yet
             val subLength = number(data, i + 3, 3)
-            if (number(data, i, 3) < 0 || subLength < 0) return declaredEnd
+            // Only receipt sub-tags (030-039): anything else (e.g. a top-level 013 or 007 after
+            // a DP that really is 999 long, with no '?') is not part of the DP.
+            val subTag = number(data, i, 3)
+            if (subTag !in 30..39 || subLength < 0) return declaredEnd
             i += 6 + subLength
         }
         return data.length + 1

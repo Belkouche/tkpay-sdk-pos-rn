@@ -488,7 +488,8 @@ const DIGITS6 = /^[0-9]{6}$/;
  * 3 + 3 ASCII digits. The result can be past `data.length` when the field is not fully
  * received yet. A DP (010) declared 999 long (the Ingenico Lane3600 caps the DP length at
  * 999 when the receipt is longer) ends at its own '?' end marker, found by walking its
- * sub-tags and '*' line separators; the value includes that '?'.
+ * receipt sub-tags (030-039) and '*' line separators; the value includes that '?'. Any
+ * other sub-record ends the walk at the declared length.
  * Shared by parseTlv and isCompleteMessage (the reader check).
  */
 export function fieldEnd(data: string, pos: number): number {
@@ -507,7 +508,9 @@ export function fieldEnd(data: string, pos: number): number {
     if (data[i] === '?') return Math.max(i + 1, declaredEnd);
     const sub = data.substring(i, i + 6);
     if (sub.length < 6) return data.length + 1; // rest of the receipt not received yet
-    if (!DIGITS6.test(sub)) return declaredEnd;
+    // Only receipt sub-tags (030-039): anything else (e.g. a top-level 013 or 007 after a DP
+    // that really is 999 long, with no '?') is not part of the DP.
+    if (!DIGITS6.test(sub) || !sub.startsWith('03')) return declaredEnd;
     i += 6 + parseInt(sub.substring(3), 10);
   }
   return data.length + 1;
@@ -573,7 +576,7 @@ export function parseTlv(tlvString: string): Record<string, string> {
 }
 
 /**
- * Mask card numbers in the text (DP4, tag 033) of every line of a DP block.
+ * Mask card numbers in every sub-tag value of a DP block, and in any unparseable remainder.
  * Digits are replaced one for one, so sub-tag headers and lengths are unchanged.
  * Same walk as the native modules' PanMasker.
  */
@@ -597,7 +600,7 @@ function maskReceiptBlock(dpValue: string): string {
     }
 
     const value = dpValue.substring(index + 6, index + 6 + length);
-    out += tag + lengthStr + (tag === RECEIPT_TAGS.CONTENT ? maskCardNumbersInText(value) : value);
+    out += tag + lengthStr + maskCardNumbersInText(value);
     index += 6 + length;
   }
 
