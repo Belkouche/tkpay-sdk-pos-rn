@@ -79,15 +79,16 @@ async function payThenVoid() {
   return { payment, result, tm003: parseTlv(sent[0] ?? ''), tm004: parseTlv(sent[1] ?? '') };
 }
 
-test('approve: payment and void give the golden merchant and customer copies', forModes('approve'), async () => {
+test('approve: payment gives both golden copies; the void TM 104 receipt is the merchant copy', forModes('approve'), async () => {
   const payment = await pay(10);
-  assertGoldenReceipt(payment.merchantReceipt, '10.00', 'DEBIT', 'Copie Commercant');
+  assertGoldenReceipt(payment.merchantReceipt, '10.00', 'DEBIT', 'Copie Commerçant');
   assertGoldenReceipt(payment.customerReceipt, '10.00', 'DEBIT', 'Copie Client');
 
   const voided = await client.cancelPayment(payment.stan, '01', '00001', payment.sequence, 1000);
   assert.equal(voided.success, true, voided.error);
-  assertGoldenReceipt(voided.merchantReceipt, '10.00', 'ANNULATION', 'Copie Commercant');
-  assertGoldenReceipt(voided.customerReceipt, '10.00', 'ANNULATION', 'Copie Client');
+  // Live terminals: TM 103 has no receipt; the TM 104 receipt is the merchant copy.
+  assertGoldenReceipt(voided.merchantReceipt, '10.00', 'ANNULATION', 'Copie Commerçant');
+  assert.equal(voided.customerReceipt, undefined);
 });
 
 test('approve: payment, management ops and two-phase void', forModes('approve'), async () => {
@@ -115,8 +116,8 @@ test('approve: payment, management ops and two-phase void', forModes('approve'),
   assert.equal(result.responseCode, '000');
   assert.equal(result.pendingConfirmation, undefined);
   assert.ok(result.stan);
-  assertFullReceipt(result.merchantReceipt, 'void merchant receipt');
-  assertFullReceipt(result.customerReceipt, 'void customer receipt');
+  assertFullReceipt(result.merchantReceipt, 'void merchant receipt (TM 104)');
+  assert.equal(result.customerReceipt, undefined);
   assert.equal(tm004['001'], '004');
   assert.equal(tm003['005'], voidedPayment.sequence, 'TM 003 NSA = payment sequence');
   assert.equal(tm004['004'], tm003['004'], 'TM 004 NS = TM 003 NS');
@@ -147,21 +148,21 @@ test('void_480: TM 104 CR=480 is a completed void', forModes('void_480'), async 
   assert.ok(result.stan);
 });
 
-test('void_995: TM 104 CR=995 is pending, STAN and TM 103 receipt kept', forModes('void_995'), async () => {
+test('void_995: TM 104 CR=995 is pending, STAN kept', forModes('void_995'), async () => {
   const { result } = await payThenVoid();
   assert.equal(result.success, false);
   assert.equal(result.pendingConfirmation, true);
   assert.equal(result.responseCode, '995');
   assert.ok(result.stan);
-  assertFullReceipt(result.merchantReceipt, 'TM 103 merchant receipt');
+  assert.equal(result.merchantReceipt, undefined, 'TM 103 carries no receipt on live terminals');
 });
 
-test('void_no_confirm: no TM 104 reply is pending, STAN and TM 103 receipt kept', forModes('void_no_confirm'), async () => {
+test('void_no_confirm: no TM 104 reply is pending, STAN kept', forModes('void_no_confirm'), async () => {
   const { payment, result } = await payThenVoid();
   assert.equal(result.success, false);
   assert.equal(result.pendingConfirmation, true);
   assert.equal(result.stan, payment.stan, 'STAN from TM 103');
-  assertFullReceipt(result.merchantReceipt, 'TM 103 merchant receipt');
+  assert.equal(result.merchantReceipt, undefined, 'TM 103 carries no receipt on live terminals');
 });
 
 test('void_refuse: TM 103 refusal is a failure, not pending', forModes('void_refuse'), async () => {
