@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test test-protocol-v2.test.js test-napspay-544.test.js test-receipts.test.js test-pan.test.js",
+    "test": "npm run build && node --test test-protocol-v2.test.js test-napspay-544.test.js test-receipts.test.js test-pan.test.js test-framing.test.js",
     "clean": "rm -rf lib",
     "test:integration": "npm run build && node --test --test-timeout=60000 test-integration.test.js",
     "test:native:ios": "mkdir -p native-tests/build && swiftc -O ios/PanMasker.swift native-tests/ios/main.swift -o native-tests/build/PanMaskerTests && native-tests/build/PanMaskerTests test-fixtures/pan-vectors.json"

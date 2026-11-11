@@ -480,39 +480,83 @@ export function maskCardNumbersInText(text: string): string {
   return text.replace(CARD_RUN, maskDigits);
 }
 
+const DIGITS3 = /^[0-9]{3}$/;
+const DIGITS6 = /^[0-9]{6}$/;
+
+/**
+ * End index (exclusive) of the TLV field starting at `pos`, or -1 if its header is not
+ * 3 + 3 ASCII digits. The result can be past `data.length` when the field is not fully
+ * received yet. A DP (010) declared 999 long (the Ingenico Lane3600 caps the DP length at
+ * 999 when the receipt is longer) ends at its own '?' end marker, found by walking its
+ * sub-tags and '*' line separators; the value includes that '?'.
+ * Shared by parseTlv and isCompleteMessage (the reader check).
+ */
+export function fieldEnd(data: string, pos: number): number {
+  const tag = data.substring(pos, pos + 3);
+  const lengthStr = data.substring(pos + 3, pos + 6);
+  if (!DIGITS3.test(tag) || !DIGITS3.test(lengthStr)) return -1;
+  const declaredEnd = pos + 6 + parseInt(lengthStr, 10);
+  if (tag !== TLV_TAGS.DP || lengthStr !== '999') return declaredEnd;
+
+  let i = pos + 6;
+  while (i < data.length) {
+    if (data[i] === '*') {
+      i++;
+      continue;
+    }
+    if (data[i] === '?') return Math.max(i + 1, declaredEnd);
+    const sub = data.substring(i, i + 6);
+    if (sub.length < 6) return data.length + 1; // rest of the receipt not received yet
+    if (!DIGITS6.test(sub)) return declaredEnd;
+    i += 6 + parseInt(sub.substring(3), 10);
+  }
+  return data.length + 1;
+}
+
+/** Largest reply accepted, in characters (replies seen are ~2 KB). */
+export const MAX_RESPONSE_CHARS = 64 * 1024;
+
+/**
+ * True once `buf` holds a complete reply: walking the fields by their length lands on a
+ * '!' (v2) or '?' (v1) terminator. A terminator inside a value (receipt lines end with '?',
+ * text may contain '!') is data. If the data is not TLV, a trailing terminator ends it.
+ * Readers call this only when the data ends with '!' or '?', and keep a silence fallback
+ * for replies without a terminator.
+ */
+export function isCompleteMessage(buf: string): boolean {
+  let pos = 0;
+  while (pos < buf.length) {
+    if (buf[pos] === '!' || buf[pos] === '?') return true;
+    if (pos + 6 > buf.length) return false;
+    const end = fieldEnd(buf, pos);
+    if (end < 0) return /[!?]$/.test(buf);
+    pos = end;
+  }
+  return false;
+}
+
 /**
  * Parse TLV string into fields map
  */
 export function parseTlv(tlvString: string): Record<string, string> {
   const fields: Record<string, string> = {};
 
-  // Values are length-delimited, so a '!' or '?' inside one (a DP block ends
-  // with '?', receipt text may contain '!') is data. The end-of-message
-  // terminator ('!' v2, '?' v1) only counts where a tag is expected; anything
-  // after it is ignored. Both are accepted so the parser stays protocol-version
-  // agnostic even if the native layer did not strip them.
+  // Fields are walked by their length (fieldEnd), so a '!' or '?' inside a value (a DP
+  // block ends with '?', receipt text may contain '!') is data. The end-of-message
+  // terminator ('!' v2, '?' v1) only counts where a tag is expected; anything after it
+  // is ignored. Malformed input ends the walk; it never throws.
   const data = tlvString;
 
   let index = 0;
 
-  while (index < data.length) {
+  while (index + 6 <= data.length) {
     if (data[index] === '!' || data[index] === '?') break;
 
-    // Need at least 6 chars for tag + length
-    if (index + 6 > data.length) break;
+    const end = fieldEnd(data, index);
+    if (end < 0 || end > data.length) break;
 
     const tag = data.substring(index, index + 3);
-    const lengthStr = data.substring(index + 3, index + 6);
-
-    // Both tag and length must be 3-digit numeric strings
-    if (!/^\d{3}$/.test(tag) || !/^\d{3}$/.test(lengthStr)) break;
-
-    const length = parseInt(lengthStr, 10);
-
-    // Check if we have enough data for the value
-    if (index + 6 + length > data.length) break;
-
-    let value = data.substring(index + 6, index + 6 + length);
+    let value = data.substring(index + 6, end);
 
     // SECURITY: Immediately mask card numbers in tag 007 (NCAR) and the DP receipt text
     if (tag === TLV_TAGS.NCAR) {
@@ -522,7 +566,7 @@ export function parseTlv(tlvString: string): Record<string, string> {
     }
 
     fields[tag] = value;
-    index += 6 + length;
+    index = end;
   }
 
   return fields;
@@ -547,7 +591,7 @@ function maskReceiptBlock(dpValue: string): string {
     const tag = dpValue.substring(index, index + 3);
     const lengthStr = dpValue.substring(index + 3, index + 6);
     const length = parseInt(lengthStr, 10);
-    if (index + 6 > dpValue.length || !/^\d{3}$/.test(lengthStr) || index + 6 + length > dpValue.length) {
+    if (index + 6 > dpValue.length || !DIGITS3.test(lengthStr) || index + 6 + length > dpValue.length) {
       // Not a sub-tag: mask what is left as plain text
       return out + maskCardNumbersInText(dpValue.substring(index));
     }
@@ -601,7 +645,7 @@ export function parseReceipt(dpValue: string, type: ReceiptType): Receipt {
     const tag = dpValue.substring(index, index + 3);
     const lengthStr = dpValue.substring(index + 3, index + 6);
 
-    if (!/^\d+$/.test(lengthStr)) break;
+    if (!DIGITS3.test(lengthStr)) break;
 
     const length = parseInt(lengthStr, 10);
 
