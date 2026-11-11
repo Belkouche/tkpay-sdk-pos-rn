@@ -288,6 +288,32 @@ test('cancelPayment: TM004 echoes MT, DE, DATR and HETR from TM103', async () =>
   assert.equal(tm004['019'], '183000');
 });
 
+test('cancelPayment: no receipt with TM103 → the TM104 receipt is the merchant copy, no customer copy', async () => {
+  reset();
+  nativeResponses = [
+    buildField('001', '103') + buildField('013', '000') + buildField('002', '000000000150') + buildField('008', '000042'),
+    buildField('001', '104') + buildField('013', '000') + buildField('008', '000042') +
+      buildField('010', dp('Copie Commerçant')),
+  ];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.cancelPayment('000042', '01', '00001', '000777', 150);
+
+  assert.equal(result.success, true);
+  assert.equal(result.merchantReceipt.type, ReceiptType.MERCHANT);
+  assert.deepEqual(result.merchantReceipt.lines.map((l) => l.text), ['Copie Commerçant']);
+  assert.equal(result.customerReceipt, undefined);
+});
+
+test('cancelPayment: direct MT=104 reply with a receipt → merchant copy only', async () => {
+  reset();
+  nativeResponses = [voidConfirmation('480')];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.cancelPayment('000042', '01', '00001', '000777', 150);
+  assert.equal(result.success, true);
+  assert.deepEqual(result.merchantReceipt.lines.map((l) => l.text), ['ANNULATION Client']);
+  assert.equal(result.customerReceipt, undefined);
+});
+
 test('cancelPayment: TM104 CR=480 is a completed cancellation (spec §4.4)', async () => {
   reset();
   nativeResponses = [voidResponse(), voidConfirmation('480')];

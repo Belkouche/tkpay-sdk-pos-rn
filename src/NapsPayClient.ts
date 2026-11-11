@@ -356,7 +356,7 @@ export class NapsPayClient {
 
       // MT=104 direct means already finalised (shouldn't normally happen)
       if (mt1 === MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE) {
-        return this.buildVoidResult(fields1, fields1[TLV_TAGS.STAN], merchantReceipt);
+        return this.buildVoidResult(fields1, fields1[TLV_TAGS.STAN], undefined);
       }
 
       if (mt1 !== MESSAGE_TYPES.CANCELLATION_RESPONSE || cr1 !== '000') {
@@ -663,7 +663,10 @@ export class NapsPayClient {
   }
 
   /**
-   * Build cancellation result from the MT=104 reply (spec §4.4):
+   * Build cancellation result from the MT=104 reply (spec §4.4).
+   * Receipts: MT=103 DP = merchant copy, MT=104 DP = customer copy; when MT=103 has
+   * no DP, the MT=104 DP is the merchant copy and there is no customer copy.
+   * Response codes:
    * CR=480 or 000 = completed; CR=995 = unconfirmed (seen with successful voids
    * on the live terminal) → pending, verify by STAN; anything else = failed.
    */
@@ -677,12 +680,17 @@ export class NapsPayClient {
     const success = cr === '000' || cr === '480';
     const pending = cr === '995';
 
+    // No receipt with MT=103 (Ingenico Lane3600, Sunmi P2): the MT=104 receipt is the
+    // merchant copy ("Copie Commerçant") and there is no customer copy.
+    const merchant = merchantReceipt ?? (dp ? parseReceipt(dp, ReceiptType.MERCHANT) : undefined);
+    const customer = merchantReceipt && dp ? parseReceipt(dp, ReceiptType.CUSTOMER) : undefined;
+
     return {
       success,
       responseCode: cr,
       stan: fields[TLV_TAGS.STAN] ?? fallbackStan,
-      merchantReceipt,
-      customerReceipt: dp ? parseReceipt(dp, ReceiptType.CUSTOMER) : undefined,
+      merchantReceipt: merchant,
+      customerReceipt: customer,
       pendingConfirmation: pending || undefined,
       error: success
         ? undefined
