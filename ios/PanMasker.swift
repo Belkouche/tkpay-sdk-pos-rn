@@ -21,19 +21,20 @@ enum PanMasker {
     static func maskReply(_ reply: String) -> String {
         var units = Array(reply.utf16)
         var i = 0
+        var previousValueStart = 0
         while i + 6 <= units.count {
             if units[i] == UInt16(UInt8(ascii: "!")) || units[i] == UInt16(UInt8(ascii: "?")) { break }
             // Same field walk as the reader: a DP declared 999 runs to its own '?'
             let end = TlvFraming.fieldEnd(units, i)
             guard end >= 0, end <= units.count, let tag = number(units, i, 3) else {
-                // Fail closed: the walk broke, mask every card-shaped run in the rest
-                var restStart = i
+                // Fail closed: the walk broke. Mask every card-shaped run in the whole rest in one
+                // pass first, from the previous field's value (lengths are untrusted: a number may
+                // straddle a declared end), then the receipt sub-tag values of a DP up to
+                // min(declared end, reply length).
+                maskRuns(&units, previousValueStart, units.count)
                 if TlvFraming.number(units, i, 3) == 10, let length = TlvFraming.number(units, i + 3, 3) {
-                    let dpEnd = min(i + 6 + length, units.count)
-                    maskReceiptBlock(&units, i + 6, dpEnd)
-                    restStart = dpEnd
+                    maskReceiptBlock(&units, i + 6, min(i + 6 + length, units.count))
                 }
-                maskRuns(&units, restStart, units.count)
                 break
             }
             let start = i + 6
@@ -42,6 +43,7 @@ enum PanMasker {
             } else if tag == 10 {
                 maskReceiptBlock(&units, start, end)
             }
+            previousValueStart = start
             i = end
         }
         return String(decoding: units, as: UTF16.self)

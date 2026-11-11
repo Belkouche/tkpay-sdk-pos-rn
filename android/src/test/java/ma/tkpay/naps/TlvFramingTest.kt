@@ -90,6 +90,32 @@ class TlvFramingTest {
     }
 
     @Test
+    fun cardNumberStraddlingTheDeclaredDpEndIsMasked() {
+        // DP declared 999, no '?', walk fails on "CARTE" (not a sub-record) -> fail closed.
+        // The declared end falls in the middle of the 16-digit number.
+        val prefix = line(1, "A") + "*CARTE "
+        val pad = "X".repeat(999 - prefix.length - 8)
+        val reply = head + "010999" + prefix + pad + "5167940000123315" + " FIN"
+        assertEquals(head.length + 6 + 999, head.length + 6 + prefix.length + pad.length + 8)
+        val masked = PanMasker.maskReply(reply)
+        assertFalse(masked.contains("5167940000123315"))
+        assertTrue(masked.contains("516794******3315"))
+    }
+
+    @Test
+    fun cardNumberStraddlingTheDeclaredEndOfAFailedDpWalkIsMasked() {
+        // The last sub-record (033, 500 long) runs past the reply, so the DP walk fails
+        // (fail-closed branch) and the declared end (999) falls inside the number.
+        val prefix = line(1, "X".repeat(946)) + "*" + "033500" + "X".repeat(10)
+        assertEquals(999 - 8, prefix.length)
+        val reply = head + "010999" + prefix + "5167940000123315" + " FIN"
+        assertTrue(TlvFraming.fieldEnd(reply, head.length) > reply.length)
+        val masked = PanMasker.maskReply(reply)
+        assertFalse(masked.contains("5167940000123315"))
+        assertTrue(masked.contains("516794******3315"))
+    }
+
+    @Test
     fun onlyAsciiDigitsAndNeverThrows() {
         assertEquals(-1, TlvFraming.fieldEnd("٠٠١003101", 0))
         assertEquals(-1, TlvFraming.fieldEnd("001００１1", 0))

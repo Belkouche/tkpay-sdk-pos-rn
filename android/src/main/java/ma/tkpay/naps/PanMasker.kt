@@ -23,19 +23,21 @@ internal object PanMasker {
     fun maskReply(reply: String): String {
         val out = StringBuilder(reply)
         var i = 0
+        var previousValueStart = 0
         while (i + 6 <= reply.length) {
             if (reply[i] == '!' || reply[i] == '?') break
             // Same field walk as the reader: a DP declared 999 runs to its own '?'
             val end = TlvFraming.fieldEnd(reply, i)
             if (end < 0 || end > reply.length) {
-                // Fail closed: the walk broke, mask every card-shaped run in the rest
-                var restStart = i
+                // Fail closed: the walk broke. Mask every card-shaped run in the whole rest in one
+                // pass first, from the previous field's value (lengths are untrusted: a number may
+                // straddle a declared end), then the receipt sub-tag values of a DP up to
+                // min(declared end, reply length).
+                maskRuns(out, previousValueStart, reply.length)
                 if (reply.startsWith(TAG_DP, i) && reply.substring(i + 3, i + 6).all { it in '0'..'9' }) {
                     val dpEnd = minOf(i + 6 + reply.substring(i + 3, i + 6).toInt(), reply.length)
                     maskReceiptBlock(out, i + 6, dpEnd)
-                    restStart = dpEnd
                 }
-                maskRuns(out, restStart, reply.length)
                 break
             }
             val tag = reply.substring(i, i + 3)
@@ -44,6 +46,7 @@ internal object PanMasker {
                 TAG_NCAR -> maskDigits(out, start, end)
                 TAG_DP -> maskReceiptBlock(out, start, end)
             }
+            previousValueStart = start
             i = end
         }
         return out.toString()

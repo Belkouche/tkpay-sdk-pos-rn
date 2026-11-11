@@ -105,5 +105,20 @@ for broken in brokenReplies {
     frameCheck(masked.utf16.count == broken.utf16.count, "fail closed keeps the length")
 }
 
+// A card number straddling the declared end of a DP whose walk fails is masked
+let straddlePrefix = line(1, "A") + "*CARTE "
+let straddlePad = String(repeating: "X", count: 999 - straddlePrefix.utf16.count - 8)
+let straddle = head + "010999" + straddlePrefix + straddlePad + "5167940000123315" + " FIN"
+let straddleMasked = PanMasker.maskReply(straddle)
+frameCheck(!straddleMasked.contains("5167940000123315") && straddleMasked.contains("516794******3315"), "number straddling the declared DP end is masked")
+
+// Same, when the DP walk fails (last sub-record runs past the reply): fail-closed branch
+let failedPrefix = line(1, String(repeating: "X", count: 946)) + "*" + "033500" + String(repeating: "X", count: 10)
+let failedStraddle = head + "010999" + failedPrefix + "5167940000123315" + " FIN"
+frameCheck(failedPrefix.utf16.count == 999 - 8, "failed-walk prefix length")
+frameCheck(TlvFraming.fieldEnd(Array(failedStraddle.utf16), head.utf16.count) > failedStraddle.utf16.count, "DP walk fails")
+let failedMasked = PanMasker.maskReply(failedStraddle)
+frameCheck(!failedMasked.contains("5167940000123315") && failedMasked.contains("516794******3315"), "number straddling the declared end of a failed DP walk is masked")
+
 print("\(text.count) text + \(replies.count) reply vectors, \(framingChecks) framing checks, \(failures) failure(s)")
 exit(failures == 0 ? 0 : 1)
