@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Port of the fixes verified live with the Node and C# SDKs on an Ingenico Lane3600 (USB) and a
+Sunmi P2 (TCP). This SDK is TCP only, so the USB serial fixes of those SDKs do not apply.
+
+### Fixed
+- **Void frames follow spec v2 §4.3/§4.4.**
+  - TM 003: TM, NCAI, NS, DA, HE, DATR, HETR, STAN, MT, NSA. NS is a new sequence generated for the void; the `sequence` passed to `cancelPayment()` (the payment's) is sent as NSA. Was: NSA only, no NS, DATR or HETR.
+  - TM 004: TM, NCAI, NS (same as TM 003), STAN, MT + DE (echoed from TM 103), DATR + HETR (echoed from TM 103), DA, HE. Never NSA.
+  - `cancelPayment()`'s signature is unchanged. `buildCancellationRequest(stan, ncai, sequence, amountCentimes?, originalSequence?)`: `sequence` is now the void's NS and the new `originalSequence` is NSA. `buildCancellationConfirmation` takes an options object (`amount`, `currency`, `datr`, `hetr`); a string is still read as the amount.
+- **Void receipt when TM 103 has none.** The Lane3600 and the Sunmi P2 send the only void receipt with TM 104 (the Sunmi prints it "Copie Commerçant"). It is now `merchantReceipt`, with no `customerReceipt`. Terminals that send a receipt with TM 103 keep TM 103 = merchant, TM 104 = customer. A direct TM 104 reply to TM 003 no longer returns its receipt as both copies.
+- **Reply cut short at a `?` or `!` inside a receipt.** The Android and iOS readers (and the Node stand-in `nodeTransport.js`) ended a reply at the first chunk ending in `!` or `?` (iOS: at any `!` or `?` received). A reply is now complete only when walking its TLV fields by their 3-digit lengths lands exactly on `!` or `?`, checked when the data ends with one; data that is not TLV falls back to "ends with `!` or `?`". The 1 s silence fallback is kept; after a silence the last `?` (possibly the DP block's own) is no longer stripped. Shared rule: `TlvFraming.kt`, `TlvFraming.swift`, `isCompleteMessage` in TS.
+- **Replies over 64 KB are rejected** (`INVALID_RESPONSE` from the native module, `NapsError` `INVALID_RESPONSE` from `processPayment()`).
+- **Parser:** fields are walked by their length (`fieldEnd`, shared by `parseTlv` and the reader check); `!` / `?` end a message only at a field boundary. A DP (tag 010) declared 999 long (the Lane3600 caps the length at 999 for longer receipts) is read up to its own `?` end marker by walking its receipt sub-records (030–039) and `*` separators; any other sub-record ends it at the declared length, so a following CR or card number stays its own field. TLV digits are ASCII `0`–`9` only, and malformed input never throws.
+- **Card number masking:** DP masking (JS and native) covers every sub-tag value and any unparseable rest, not only the text (033). The native `PanMasker` now fails closed: if the field walk breaks, every card-shaped run in the rest of the reply is masked.
+- **`networkTest()` sends nothing over TCP** and returns `success: false`, `responseCode: 'UNSUPPORTED'`. The NapsPay app on Sunmi terminals answers TM 009 with TM 101 / CR 902, and a test frame crashed the app on a Sunmi P2.
+- `resetPinPad()` used a fixed 10 s timeout; it now uses `timeout` like the other management operations.
+
+### Added
+- `fieldEnd`, `isCompleteMessage`, `MAX_RESPONSE_CHARS` and the `CancellationConfirmationOptions` type are exported.
+- Tests: `test-framing.test.js` (framing, DP 999, non-ASCII digits), `test-reader.test.js` (reader against a local TCP server, 64 KB cap), void frame / NS-NSA / TM 104 receipt / network test / no-terminator / timeout tests in `test-napspay-544.test.js`, `TlvFramingTest.kt`, and framing checks in the iOS native test (`npm run test:native:ios`).
+
 ## [1.6.0] - 2026-11-09
 
 - **Removed the gateway notification.** `processPayment()` no longer sends a background `POST` to

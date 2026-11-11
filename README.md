@@ -175,12 +175,16 @@ A void (cancellation) of an approved payment is also **two exchanges on one conn
 sequenceDiagram
     participant App as Your app (SDK)
     participant T as Terminal
-    App->>T: TM 003 Cancellation (STAN of the sale, amount)
-    T-->>App: TM 103 (CR 000 = sale found; amount, merchant void receipt)
-    App->>T: TM 004 Cancellation confirmation (same connection, same sequence, echoes amount)
-    T-->>App: TM 104 (CR 480 or 000 = void done; void STAN, customer receipt)
+    App->>T: TM 003 Cancellation (new sequence NS; STAN, amount and sequence (NSA) of the sale)
+    T-->>App: TM 103 (CR 000 = sale found; amount, maybe the merchant void receipt)
+    App->>T: TM 004 Cancellation confirmation (same connection, same NS as TM 003, echoes amount)
+    T-->>App: TM 104 (CR 480 or 000 = void done; void STAN, void receipt)
 ```
 
+- **Frames (spec v2 §4.3/§4.4).** TM 003: TM, NCAI, NS, DA, HE, DATR, HETR, STAN, MT, NSA. The
+  void gets its own new sequence (NS); the `sequence` you pass is the sale's and goes in NSA.
+  TM 004: TM, NCAI, NS (same as TM 003), STAN, MT and DE (echoed from TM 103), DATR and HETR
+  (echoed from TM 103), DA, HE. TM 004 never carries NSA.
 - **TM 103 with CR 000 only means the sale was found.** The reversal is executed by TM 004.
 - **TM 104 with CR 480 or 000:** the void is done. `success: true`.
 - **TM 104 with CR 995, or no TM 104 within `confirmationTimeout`:** the outcome is unknown.
@@ -189,6 +193,10 @@ sequenceDiagram
   receipt for the sale's STAN.
 - **Any other result** (TM 103 refused, e.g. 302 not found or 482 already cancelled, or a TM 104
   refusal): `success: false`, no `pendingConfirmation`. The payment is not voided.
+- **Receipts.** If TM 103 carries a receipt, it is the merchant copy and the TM 104 receipt is the
+  customer copy. If TM 103 has no receipt and TM 104 has one (the Sunmi P2 prints it
+  "Copie Commerçant"; the Ingenico Lane3600 does the same), the TM 104 receipt is returned as
+  `merchantReceipt` and there is no `customerReceipt`.
 
 ```typescript
 import { NapsPayClient, type PaymentResult } from 'react-native-tkpay-naps';
@@ -198,7 +206,7 @@ async function voidPayment(client: NapsPayClient, payment: PaymentResult, amount
     payment.stan!,             // STAN of the sale to void
     '01',                      // same register as the sale
     '00001',                   // same cashier as the sale
-    payment.sequence!,         // sequence of the sale
+    payment.sequence!,         // sequence of the sale (sent as NSA; the void gets its own NS)
     Math.round(amount * 100),  // sale amount in centimes (required by NapsPay v5.4.4)
   );
 
@@ -228,8 +236,8 @@ Voids must be done before end-of-day settlement. A void of an already-voided sal
   success: boolean,              // true for TM 104 CR 480 or 000
   responseCode: string,
   stan?: string,                 // void STAN from TM 104, else the TM 103 STAN
-  merchantReceipt?: Receipt,     // void receipt, merchant copy (TM 103)
-  customerReceipt?: Receipt,     // void receipt, customer copy (TM 104)
+  merchantReceipt?: Receipt,     // void receipt, merchant copy (TM 103, or TM 104 if TM 103 has none)
+  customerReceipt?: Receipt,     // void receipt, customer copy (TM 104, only when TM 103 had a receipt)
   pendingConfirmation?: boolean, // TM 104 CR 995 or no TM 104: outcome unknown
   error?: string,
 }
@@ -244,11 +252,15 @@ a transport error comes back as `success: false` with `responseCode: ''` and `er
 
 ### `networkTest`
 
-TM 009. Checks that the terminal answers at protocol level and measures the round trip.
+TM 009 is **not supported over TCP**, the only connection of this SDK. `networkTest()` sends
+nothing and returns `success: false` with `responseCode: 'UNSUPPORTED'`: the NapsPay app on
+Sunmi terminals does not implement TM 009 (it answers TM 101 with CR 902), and a test frame
+crashed the app on a Sunmi P2. The network test is for USB links (C# and Node SDKs). To check
+that the terminal is reachable, use `testConnection()`.
 
 ```typescript
 const net = await client.networkTest('01', '00001');
-console.log(net.success ? `Terminal OK in ${net.rttMs} ms` : `Network test failed: ${net.error}`);
+// { success: false, responseCode: 'UNSUPPORTED', error: 'Network test not supported over TCP (...)' }
 ```
 
 ### `referencing`
@@ -303,7 +315,7 @@ console.log(reset.success ? 'Terminal reset' : reset.error);
 
 ### `testConnection`
 
-TCP only: opens and closes a socket (5 s timeout), no protocol message. Prefer `networkTest()`.
+TCP only: opens and closes a socket (5 s timeout), no protocol message.
 
 ```typescript
 const reachable = await client.testConnection();
@@ -336,8 +348,8 @@ interface Receipt {
 | `processPayment` | `merchantReceipt` ("Copie Commercant") | TM 101 |
 | `processPayment` | `customerReceipt` ("Copie Client") | TM 102 |
 | `processPayment` declined | `merchantReceipt` | decline receipt, as sent |
-| `cancelPayment` | `merchantReceipt` (ends "ANNULATION", "Copie Commercant") | TM 103, also kept on a pending void |
-| `cancelPayment` | `customerReceipt` (ends "ANNULATION", "Copie Client") | TM 104 |
+| `cancelPayment` | `merchantReceipt` (ends "ANNULATION", "Copie Commercant") | TM 103, also kept on a pending void; TM 104 when TM 103 has no receipt |
+| `cancelPayment` | `customerReceipt` (ends "ANNULATION", "Copie Client") | TM 104, only when TM 103 had a receipt |
 | `printDuplicate` | `merchantReceipt` | TM 108, as sent |
 | `totals` / `settlement` | `receipt` | TM 110, as sent |
 | `referencing` | `receipt` | TM 113, as sent |
@@ -467,7 +479,7 @@ Timeouts under 1000 ms are raised to 1000 ms, with a console warning.
 
 | `error.code` | When |
 |---|---|
-| `INVALID_RESPONSE` | Request rejected before sending (amount ≤ 0, `registerId` not 2 characters, `cashierId` not 5), or a response without CR or STAN |
+| `INVALID_RESPONSE` | Request rejected before sending (amount ≤ 0, `registerId` not 2 characters, `cashierId` not 5), a response without CR or STAN, or a reply over 64 KB |
 | `TIMEOUT` | The native error message contains "timeout" |
 | `CONNECTION_FAILED` | The native error message contains "connect" or "connection" |
 | `UNKNOWN_ERROR` | Anything else. On Android a read timeout reports "Read timed out" and lands here. |
@@ -559,7 +571,7 @@ point at a different emulator.
 - Phone and terminal on the same Wi‑Fi network, and the IP in `host` is the terminal's current IP.
 - The NapsPay app is open on the terminal and idle ("Attente Caisse"). It listens on port 4444.
 - iOS: the local-network permission was granted (Settings → Privacy → Local Network).
-- `networkTest()` confirms the terminal answers at protocol level.
+- `testConnection()` confirms the terminal accepts a TCP connection on the port.
 
 **Payment times out**
 - The customer has `timeout` (120 s by default) to pay. Increase it if needed.
