@@ -20,10 +20,10 @@ enum PanMasker {
         var i = 0
         while i + 6 <= units.count {
             if units[i] == UInt16(UInt8(ascii: "!")) || units[i] == UInt16(UInt8(ascii: "?")) { break }
-            guard let tag = number(units, i, 3), let length = number(units, i + 3, 3) else { break }
+            // Same field walk as the reader: a DP declared 999 runs to its own '?'
+            let end = TlvFraming.fieldEnd(units, i)
+            guard end >= 0, end <= units.count, let tag = number(units, i, 3) else { break }
             let start = i + 6
-            let end = start + length
-            if end > units.count { break }
             if tag == 7 {
                 maskDigits(&units, start, end)
             } else if tag == 10 {

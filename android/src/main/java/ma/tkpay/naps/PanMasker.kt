@@ -23,12 +23,11 @@ internal object PanMasker {
         var i = 0
         while (i + 6 <= reply.length) {
             if (reply[i] == '!' || reply[i] == '?') break
+            // Same field walk as the reader: a DP declared 999 runs to its own '?'
+            val end = TlvFraming.fieldEnd(reply, i)
+            if (end < 0 || end > reply.length) break
             val tag = reply.substring(i, i + 3)
-            val lengthStr = reply.substring(i + 3, i + 6)
-            if (!tag.all { it in '0'..'9' } || !lengthStr.all { it in '0'..'9' }) break
             val start = i + 6
-            val end = start + lengthStr.toInt()
-            if (end > reply.length) break
             when (tag) {
                 TAG_NCAR -> maskDigits(out, start, end)
                 TAG_DP -> maskReceiptBlock(out, start, end)

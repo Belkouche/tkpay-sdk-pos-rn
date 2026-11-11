@@ -196,6 +196,10 @@ export class NapsPayClient {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
 
+      // Native reader rejected the reply (over 64 KB)
+      if ((error as { code?: string } | null)?.code === 'INVALID_RESPONSE') {
+        throw NapsError.invalidResponse(errorMessage);
+      }
       if (errorMessage.includes('timeout')) {
         throw NapsError.timeout();
       }
