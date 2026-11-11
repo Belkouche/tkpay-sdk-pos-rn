@@ -30,7 +30,6 @@ import {
   buildSettlementRequest,
   buildCancellationRequest,
   buildCancellationConfirmation,
-  buildNetworkTestRequest,
   buildDuplicateRequest,
   buildResetRequest,
   buildReferencingRequest,
@@ -269,47 +268,26 @@ export class NapsPayClient {
   }
 
   /**
-   * Send a network test message to the terminal (TM=009)
+   * Network test (TM=009) — not supported over TCP, the only transport of this SDK.
    *
-   * Unlike testConnection() which only opens a TCP socket,
-   * this sends the actual NAPS M2M network test message and
-   * verifies the terminal responds RC=000.
+   * Sends nothing and returns `success: false` with `responseCode: 'UNSUPPORTED'`.
+   * The NapsPay app on Sunmi terminals does not implement TM=009 (it answers TM=101
+   * with CR=902), and a test frame crashed the app on a Sunmi P2. Use
+   * testConnection() to check that the terminal is reachable.
    *
    * @param registerId Register ID (2 digits)
    * @param cashierId  Cashier ID (5 digits)
    */
   async networkTest(
-    registerId: string,
-    cashierId: string
+    _registerId: string,
+    _cashierId: string
   ): Promise<NetworkTestResult> {
-    const ncai = registerId + cashierId;
-    const tlv = buildNetworkTestRequest(ncai, this.generateSequence());
-    const start = Date.now();
-
-    try {
-      const raw = await getNativeModule().sendPaymentRequest(
-        this.config.host,
-        this.config.port,
-        tlv,
-        10000 // short timeout — terminal should answer immediately
-      );
-
-      const fields = parseTlv(raw);
-      const responseCode = fields[TLV_TAGS.CR] ?? '';
-      const rttMs = Date.now() - start;
-
-      return {
-        success: responseCode === '000',
-        responseCode,
-        rttMs,
-        error: responseCode !== '000'
-          ? `Network test failed with code: ${responseCode}`
-          : undefined,
-      };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return { success: false, responseCode: '', error: message };
-    }
+    return {
+      success: false,
+      responseCode: 'UNSUPPORTED',
+      error:
+        "Network test not supported over TCP (the terminal's payment app does not implement TM 009)",
+    };
   }
 
   /**
@@ -482,7 +460,7 @@ export class NapsPayClient {
         this.config.host,
         this.config.port,
         tlv,
-        10000
+        this.config.timeout
       );
 
       const fields = parseTlv(raw);

@@ -96,8 +96,10 @@ test('approve: payment, management ops and two-phase void', forModes('approve'),
   assertFullReceipt(payment.merchantReceipt, 'payment merchant receipt');
   assertFullReceipt(payment.customerReceipt, 'payment customer receipt');
 
+  const net = await client.networkTest('01', '00001');
+  assert.equal(net.responseCode, 'UNSUPPORTED', 'TM 009 is not sent over TCP');
+
   for (const op of [
-    () => client.networkTest('01', '00001'),
     () => client.totals('01', '00001'),
     () => client.referencing('01', '00001'),
     () => client.printDuplicate('01', '00001'),

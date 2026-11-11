@@ -382,6 +382,50 @@ test('cancelPayment: TM104 refusal fails the void; connection errors still fail'
   assert.equal(dropped.success, false);
 });
 
+test('networkTest over TCP sends nothing and returns UNSUPPORTED', async () => {
+  reset();
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.networkTest('01', '00001');
+  assert.equal(result.success, false);
+  assert.equal(result.responseCode, 'UNSUPPORTED');
+  assert.match(result.error, /not supported over TCP/);
+  assert.equal(nativeCalls.length, 0, 'no frame sent');
+});
+
+test('no request frame ends with "!" or "?" (TCP requests carry no terminator)', async () => {
+  reset();
+  nativeResponses = [
+    buildField('001', '101') + buildField('013', '000') + buildField('008', '000042'),
+    buildField('001', '102') + buildField('013', '000'),
+    voidResponse(), voidConfirmation(),
+    ...Array(5).fill(buildField('013', '000')),
+  ];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  await client.processPayment({ amount: 1.5, registerId: '01', cashierId: '00001' });
+  await client.cancelPayment('000042', '01', '00001', '000001', 150);
+  await client.settlement('01', '00001');
+  await client.totals('01', '00001');
+  await client.referencing('01', '00001');
+  await client.printDuplicate('01', '00001');
+  await client.resetPinPad('01', '00001');
+  assert.equal(nativeCalls.length, 9);
+  for (const call of nativeCalls) {
+    assert.doesNotMatch(call.tlv, /[!?]$/, call.tlv);
+  }
+});
+
+test('management operations use the main timeout, never a shorter fixed one', async () => {
+  reset();
+  nativeResponses = Array(5).fill(buildField('013', '000'));
+  const client = new NapsPayClient({ host: '127.0.0.1', timeout: 90000 });
+  await client.settlement('01', '00001');
+  await client.totals('01', '00001');
+  await client.referencing('01', '00001');
+  await client.printDuplicate('01', '00001');
+  await client.resetPinPad('01', '00001');
+  assert.deepEqual(nativeCalls.map((c) => c.timeout), [90000, 90000, 90000, 90000, 90000]);
+});
+
 test('response-code table covers the full NapsPay ISO list', () => {
   for (const code of ['265', '281', '385', '400', '500', '888']) {
     assert.ok(!describeResponseCode(code).startsWith('Unknown'), code);
