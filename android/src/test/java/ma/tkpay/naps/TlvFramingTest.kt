@@ -75,6 +75,21 @@ class TlvFramingTest {
     }
 
     @Test
+    fun maskingFailsClosedWhenTheWalkBreaksBeforeACardNumber() {
+        for (broken in listOf(
+            head + "XYZ" + "5167940000123315",
+            (head + field("016", "CLIENT 5167940000123315 XYZ")).dropLast(3),
+            head + "010050" + line(1, "CARTE 5167940000123315"),
+            head + "010999" + line(1, "A") + "*" + "CARTE 5167940000123315",
+        )) {
+            val masked = PanMasker.maskReply(broken)
+            assertFalse(broken, masked.contains("5167940000123315"))
+            assertTrue(broken, masked.contains("516794******3315"))
+            assertEquals(broken.length, masked.length)
+        }
+    }
+
+    @Test
     fun onlyAsciiDigitsAndNeverThrows() {
         assertEquals(-1, TlvFraming.fieldEnd("٠٠١003101", 0))
         assertEquals(-1, TlvFraming.fieldEnd("001００１1", 0))

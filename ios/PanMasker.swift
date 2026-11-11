@@ -8,6 +8,9 @@ import Foundation
 ///   digits are adjacent or separated by exactly one space, dash, dot, tab or
 ///   non-breaking space; runs over 19 digits are masked too.
 ///
+/// If the field walk breaks (not TLV, or a field longer than the reply), every
+/// card-shaped run in the rest of the reply is masked (fail closed).
+///
 /// Digits are replaced one for one, so the reply length, every TLV length and
 /// the receipt layout stay unchanged. Works on UTF-16 code units, like the JS
 /// layer (TlvProtocol.ts) and the Android PanMasker.
@@ -22,7 +25,17 @@ enum PanMasker {
             if units[i] == UInt16(UInt8(ascii: "!")) || units[i] == UInt16(UInt8(ascii: "?")) { break }
             // Same field walk as the reader: a DP declared 999 runs to its own '?'
             let end = TlvFraming.fieldEnd(units, i)
-            guard end >= 0, end <= units.count, let tag = number(units, i, 3) else { break }
+            guard end >= 0, end <= units.count, let tag = number(units, i, 3) else {
+                // Fail closed: the walk broke, mask every card-shaped run in the rest
+                var restStart = i
+                if TlvFraming.number(units, i, 3) == 10, let length = TlvFraming.number(units, i + 3, 3) {
+                    let dpEnd = min(i + 6 + length, units.count)
+                    maskReceiptBlock(&units, i + 6, dpEnd)
+                    restStart = dpEnd
+                }
+                maskRuns(&units, restStart, units.count)
+                break
+            }
             let start = i + 6
             if tag == 7 {
                 maskDigits(&units, start, end)

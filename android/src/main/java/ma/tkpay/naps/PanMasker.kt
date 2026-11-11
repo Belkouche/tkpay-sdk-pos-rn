@@ -9,6 +9,9 @@ package ma.tkpay.naps
  *   digits are adjacent or separated by exactly one space, dash, dot, tab or
  *   non-breaking space; runs over 19 digits are masked too.
  *
+ * If the field walk breaks (not TLV, or a field longer than the reply), every
+ * card-shaped run in the rest of the reply is masked (fail closed).
+ *
  * Digits are replaced one for one, so the reply length, every TLV length and
  * the receipt layout stay unchanged. Same rule as the JS layer (TlvProtocol.ts).
  */
@@ -24,7 +27,17 @@ internal object PanMasker {
             if (reply[i] == '!' || reply[i] == '?') break
             // Same field walk as the reader: a DP declared 999 runs to its own '?'
             val end = TlvFraming.fieldEnd(reply, i)
-            if (end < 0 || end > reply.length) break
+            if (end < 0 || end > reply.length) {
+                // Fail closed: the walk broke, mask every card-shaped run in the rest
+                var restStart = i
+                if (reply.startsWith(TAG_DP, i) && reply.substring(i + 3, i + 6).all { it in '0'..'9' }) {
+                    val dpEnd = minOf(i + 6 + reply.substring(i + 3, i + 6).toInt(), reply.length)
+                    maskReceiptBlock(out, i + 6, dpEnd)
+                    restStart = dpEnd
+                }
+                maskRuns(out, restStart, reply.length)
+                break
+            }
             val tag = reply.substring(i, i + 3)
             val start = i + 6
             when (tag) {

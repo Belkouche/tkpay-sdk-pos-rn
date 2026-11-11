@@ -90,5 +90,20 @@ let anyTagMasked = PanMasker.maskReply(head + field("010", anyTagDp) + "!")
 frameCheck(!anyTagMasked.contains(pan), "PAN masked in every DP sub-tag value and the rest")
 frameCheck(anyTagMasked.utf16.count == (head + field("010", anyTagDp) + "!").utf16.count, "masking keeps the length")
 
+// Fail closed: a walk that breaks before a card number still masks it
+let notTlv: String = head + "XYZ" + "5167940000123315"
+let truncated: String = String((head + field("016", "CLIENT 5167940000123315 XYZ")).dropLast(3))
+let brokenReplies: [String] = [
+    notTlv,                                                              // not TLV
+    truncated,                                                           // field longer than the reply
+    head + "010050" + line(1, "CARTE 5167940000123315"),                  // DP declared longer than the reply
+    head + "010999" + line(1, "A") + "*" + "CARTE 5167940000123315",     // DP 999 walk fails, no '?'
+]
+for broken in brokenReplies {
+    let masked = PanMasker.maskReply(broken)
+    frameCheck(!masked.contains("5167940000123315") && masked.contains("516794******3315"), "fail closed: \(broken.debugDescription) -> \(masked)")
+    frameCheck(masked.utf16.count == broken.utf16.count, "fail closed keeps the length")
+}
+
 print("\(text.count) text + \(replies.count) reply vectors, \(framingChecks) framing checks, \(failures) failure(s)")
 exit(failures == 0 ? 0 : 1)
