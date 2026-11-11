@@ -265,58 +265,91 @@ export function buildSettlementRequest(ncai: string): string {
 }
 
 /**
- * Build cancellation request TLV (TM=003)
+ * Build cancellation request TLV (TM=003, spec v2 §4.3)
  *
+ * Fields: TM, NCAI, NS, DA, HE, DATR, HETR, STAN, [MT], [NSA].
+ * NS is a new sequence for the void; NSA is the sequence of the payment to void.
  * NapsPay v5.4.4+ requires the original amount (TAG 002) in the frame.
- * Pass `amountCentimes` when targeting v5.4.4+.
  *
  * @param stan   STAN of the transaction to cancel
  * @param ncai   Register(2) + Cashier(5)
- * @param sequence  Original sequence number
+ * @param sequence  NS of this void (new sequence; TM=004 repeats it)
  * @param amountCentimes  Original amount in centimes (required for v5.4.4+)
+ * @param originalSequence  Sequence of the payment to void, sent as NSA (TAG 005)
  */
 export function buildCancellationRequest(
   stan: string,
   ncai: string,
   sequence: string,
-  amountCentimes?: number
+  amountCentimes?: number,
+  originalSequence?: string
 ): string {
-  let msg = buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_REQUEST);
+  const date = getCurrentDate();
+  const time = getCurrentTime();
+  let msg =
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence) +
+    buildField(TLV_TAGS.DA, date) +
+    buildField(TLV_TAGS.HE, time) +
+    buildField(TLV_TAGS.DATR, date) +
+    buildField(TLV_TAGS.HETR, time) +
+    buildField(TLV_TAGS.STAN, stan);
   if (amountCentimes !== undefined) {
     msg += buildField(TLV_TAGS.MT, amountCentimes.toString());
   }
-  msg +=
-    buildField(TLV_TAGS.STAN, stan) +
-    buildField(TLV_TAGS.NCAI, ncai) +
-    buildField(TLV_TAGS.NSA, sequence) +
-    buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime());
+  if (originalSequence) {
+    msg += buildField(TLV_TAGS.NSA, originalSequence);
+  }
   return msg;
 }
 
 /**
- * Build cancellation confirmation request TLV (TM=004)
+ * Values echoed from the MT=103 reply into the TM=004 confirmation.
+ */
+export interface CancellationConfirmationOptions {
+  /** MT (TAG 002) echoed verbatim from MT=103 — required by NapsPay v5.4.4+. */
+  amount?: string;
+  /** DE (TAG 012) echoed from MT=103; default "504" (MAD). Sent only with MT. */
+  currency?: string;
+  /** DATR / HETR (TAGs 018/019) echoed from MT=103. */
+  datr?: string;
+  hetr?: string;
+}
+
+/**
+ * Build cancellation confirmation request TLV (TM=004, spec v2 §4.4)
  * Sent on the same connection after receiving MT=103 from TM=003.
  *
- * @param amount  Amount echoed from the MT=103 response (TAG 002, 12-digit) —
- *                required by NapsPay v5.4.4+
+ * Fields: TM, NCAI, NS (same as the TM=003), STAN, [MT, DE], [DATR], [HETR], DA, HE. No NSA.
+ * A string in place of `options` is the MT=103 amount (earlier signature).
  */
 export function buildCancellationConfirmation(
   stan: string,
   ncai: string,
   sequence: string,
-  amount?: string
+  options: CancellationConfirmationOptions | string = {}
 ): string {
-  let msg = buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_CONFIRMATION_REQUEST);
-  if (amount !== undefined) {
-    msg += buildField(TLV_TAGS.MT, amount);
+  if (typeof options === 'string') {
+    options = { amount: options };
   }
-  msg +=
-    buildField(TLV_TAGS.STAN, stan) +
+  let msg =
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_CONFIRMATION_REQUEST) +
     buildField(TLV_TAGS.NCAI, ncai) +
     buildField(TLV_TAGS.NS, sequence) +
-    buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime());
+    buildField(TLV_TAGS.STAN, stan);
+  if (options.amount) {
+    msg +=
+      buildField(TLV_TAGS.MT, options.amount) +
+      buildField(TLV_TAGS.DE, options.currency || CURRENCY.MAD);
+  }
+  if (options.datr) {
+    msg += buildField(TLV_TAGS.DATR, options.datr);
+  }
+  if (options.hetr) {
+    msg += buildField(TLV_TAGS.HETR, options.hetr);
+  }
+  msg += buildField(TLV_TAGS.DA, getCurrentDate()) + buildField(TLV_TAGS.HE, getCurrentTime());
   return msg;
 }
 

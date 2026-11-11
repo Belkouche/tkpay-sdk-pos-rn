@@ -108,7 +108,7 @@ test('approve: payment, management ops and two-phase void', forModes('approve'),
     assert.equal(r.responseCode, '000');
   }
 
-  const { result, tm003, tm004 } = await payThenVoid();
+  const { payment: voidedPayment, result, tm003, tm004 } = await payThenVoid();
   assert.equal(result.success, true, result.error);
   assert.equal(result.responseCode, '000');
   assert.equal(result.pendingConfirmation, undefined);
@@ -116,7 +116,9 @@ test('approve: payment, management ops and two-phase void', forModes('approve'),
   assertFullReceipt(result.merchantReceipt, 'void merchant receipt');
   assertFullReceipt(result.customerReceipt, 'void customer receipt');
   assert.equal(tm004['001'], '004');
-  assert.equal(tm004['004'], tm003['005'], 'TM 004 NS = TM 003 sequence');
+  assert.equal(tm003['005'], voidedPayment.sequence, 'TM 003 NSA = payment sequence');
+  assert.equal(tm004['004'], tm003['004'], 'TM 004 NS = TM 003 NS');
+  assert.equal(tm004['005'], undefined, 'no NSA in TM 004');
   assert.equal(tm004['002'], '1234', 'TM 004 echoes the TM 103 amount');
 });
 

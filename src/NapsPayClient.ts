@@ -324,7 +324,8 @@ export class NapsPayClient {
    * @param stan       STAN of the transaction to cancel
    * @param registerId Register ID (2 digits)
    * @param cashierId  Cashier ID (5 digits)
-   * @param sequence   Sequence number of the original transaction
+   * @param sequence   Sequence number of the original transaction, sent as NSA (TAG 005);
+   *                   the void itself gets a new sequence (NS), repeated in TM=004
    * @param amountCentimes  Original amount in centimes (required for v5.4.4+)
    */
   async cancelPayment(
@@ -335,7 +336,8 @@ export class NapsPayClient {
     amountCentimes?: number
   ): Promise<CancellationResult> {
     const ncai = registerId + cashierId;
-    const tlv = buildCancellationRequest(stan, ncai, sequence, amountCentimes);
+    const voidSequence = this.generateSequence();
+    const tlv = buildCancellationRequest(stan, ncai, voidSequence, amountCentimes, sequence);
 
     try {
       // Phase 1: send TM=003, keep connection open — terminal replies MT=103 immediately
@@ -368,12 +370,17 @@ export class NapsPayClient {
 
       // Phase 2: send TM=004 confirmation on the same connection → MT=104.
       // NS (TAG 004) carries the same sequence as the TM=003 (spec §4.4: 004.NS = 003.NS).
-      // Echo the amount (TAG 002) from the MT=103 response — required by v5.4.4+.
+      // Echo MT/DE and DATR/HETR from the MT=103 response — MT is required by v5.4.4+.
       const confirmTlv = buildCancellationConfirmation(
         fields1[TLV_TAGS.STAN] ?? stan,
         ncai,
-        sequence,
-        fields1[TLV_TAGS.MT]
+        voidSequence,
+        {
+          amount: fields1[TLV_TAGS.MT],
+          currency: fields1[TLV_TAGS.DE],
+          datr: fields1[TLV_TAGS.DATR],
+          hetr: fields1[TLV_TAGS.HETR],
+        }
       );
       let raw2: string;
       try {

@@ -42,6 +42,8 @@ const {
   buildReferencingRequest,
   buildTotalsRequest,
   buildSettlementRequest,
+  buildCancellationRequest,
+  buildCancellationConfirmation,
   NapsPayClient,
   TIDE,
   ReceiptType,
@@ -213,7 +215,7 @@ test('cancelPayment: TM003→103 then TM004→104 returns void STAN and both voi
   assert.equal(result.pendingConfirmation, undefined);
 });
 
-test('cancelPayment: TM004 carries the TM003 sequence in NS (tag 004), not NSA (tag 005)', async () => {
+test('cancelPayment: TM003 gets a new NS, the payment sequence goes in NSA; TM004 repeats the TM003 NS, no NSA', async () => {
   reset();
   nativeResponses = [voidResponse(), voidConfirmation()];
   const client = new NapsPayClient({ host: '127.0.0.1' });
@@ -221,11 +223,69 @@ test('cancelPayment: TM004 carries the TM003 sequence in NS (tag 004), not NSA (
 
   const tm003 = byTag(nativeCalls[0].tlv);
   const tm004 = byTag(nativeCalls[1].tlv);
+  assert.equal(tm003['005'], '000777', 'TM 003 NSA = sequence of the payment to void');
+  assert.match(tm003['004'], /^\d{6}$/);
+  assert.notEqual(tm003['004'], '000777', 'TM 003 NS is a new sequence');
   assert.equal(tm004['001'], '004');
-  assert.equal(tm004['004'], '000777');
-  assert.equal(tm004['004'], tm003['005'], '004.NS = sequence sent with TM 003');
+  assert.equal(tm004['004'], tm003['004'], '004.NS = 003.NS');
   assert.equal(tm004['005'], undefined, 'no NSA in TM 004');
   assert.equal(tm004['008'], '000042');
+});
+
+test('cancelPayment: each void gets its own NS', async () => {
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const sequences = [];
+  for (let i = 0; i < 2; i++) {
+    reset();
+    nativeResponses = [voidResponse(), voidConfirmation()];
+    await client.cancelPayment('000042', '01', '00001', '000777', 150);
+    sequences.push(byTag(nativeCalls[0].tlv)['004']);
+  }
+  assert.notEqual(sequences[0], sequences[1]);
+});
+
+test('TM003 frame order (spec v2 §4.3): TM, NCAI, NS, DA, HE, DATR, HETR, STAN, MT, NSA', () => {
+  const frame = buildCancellationRequest('000042', '0100001', '000005', 150, '000777');
+  assert.deepEqual(tags(frame), ['001', '003', '004', '014', '015', '018', '019', '008', '002', '005']);
+  const f = byTag(frame);
+  assert.equal(f['004'], '000005');
+  assert.equal(f['005'], '000777');
+  assert.equal(f['002'], '150');
+  assert.equal(f['018'], f['014'], 'DATR = current date');
+  assert.equal(f['019'], f['015'], 'HETR = current time');
+  assert.deepEqual(tags(buildCancellationRequest('000042', '0100001', '000005')),
+    ['001', '003', '004', '014', '015', '018', '019', '008'], 'MT and NSA only when given');
+});
+
+test('TM004 frame order (spec v2 §4.4): TM, NCAI, NS, STAN, MT, DE, DATR, HETR, DA, HE', () => {
+  const frame = buildCancellationConfirmation('000042', '0100001', '000005',
+    { amount: '000000000150', datr: '10112026', hetr: '101500' });
+  assert.deepEqual(tags(frame), ['001', '003', '004', '008', '002', '012', '018', '019', '014', '015']);
+  const f = byTag(frame);
+  assert.equal(f['002'], '000000000150', 'MT verbatim');
+  assert.equal(f['012'], '504', 'DE defaults to 504');
+  assert.equal(f['018'], '10112026');
+  assert.equal(f['019'], '101500');
+  assert.equal(byTag(buildCancellationConfirmation('000042', '0100001', '000005', { amount: '1', currency: '978' }))['012'], '978');
+  assert.deepEqual(tags(buildCancellationConfirmation('000042', '0100001', '000005')),
+    ['001', '003', '004', '008', '014', '015'], 'no MT/DE/DATR/HETR when TM 103 had none');
+  assert.deepEqual(tags(buildCancellationConfirmation('000042', '0100001', '000005', '000000000150')),
+    ['001', '003', '004', '008', '002', '012', '014', '015'], 'a string is the amount (earlier signature)');
+});
+
+test('cancelPayment: TM004 echoes MT, DE, DATR and HETR from TM103', async () => {
+  reset();
+  nativeResponses = [
+    voidResponse() + buildField('012', '504') + buildField('018', '09112026') + buildField('019', '183000'),
+    voidConfirmation(),
+  ];
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  await client.cancelPayment('000042', '01', '00001', '000777', 150);
+  assert.deepEqual(tags(nativeCalls[1].tlv), ['001', '003', '004', '008', '002', '012', '018', '019', '014', '015']);
+  const tm004 = byTag(nativeCalls[1].tlv);
+  assert.equal(tm004['002'], '000000000150');
+  assert.equal(tm004['018'], '09112026');
+  assert.equal(tm004['019'], '183000');
 });
 
 test('cancelPayment: TM104 CR=480 is a completed cancellation (spec §4.4)', async () => {

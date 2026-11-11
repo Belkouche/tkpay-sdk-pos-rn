@@ -54,4 +54,5 @@ export {
   APPROVED_CODES,
   RESPONSE_CODES,
   type ConfirmationOptions,
+  type CancellationConfirmationOptions,
 } from './TlvProtocol';
