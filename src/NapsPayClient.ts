@@ -30,7 +30,6 @@ import {
   buildSettlementRequest,
   buildCancellationRequest,
   buildCancellationConfirmation,
-  buildNetworkTestRequest,
   buildDuplicateRequest,
   buildResetRequest,
   buildReferencingRequest,
@@ -196,6 +195,10 @@ export class NapsPayClient {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
 
+      // Native reader rejected the reply (over 64 KB)
+      if ((error as { code?: string } | null)?.code === 'INVALID_RESPONSE') {
+        throw NapsError.invalidResponse(errorMessage);
+      }
       if (errorMessage.includes('timeout')) {
         throw NapsError.timeout();
       }
@@ -265,47 +268,26 @@ export class NapsPayClient {
   }
 
   /**
-   * Send a network test message to the terminal (TM=009)
+   * Network test (TM=009) — not supported over TCP, the only transport of this SDK.
    *
-   * Unlike testConnection() which only opens a TCP socket,
-   * this sends the actual NAPS M2M network test message and
-   * verifies the terminal responds RC=000.
+   * Sends nothing and returns `success: false` with `responseCode: 'UNSUPPORTED'`.
+   * The NapsPay app on Sunmi terminals does not implement TM=009 (it answers TM=101
+   * with CR=902), and a test frame crashed the app on a Sunmi P2. Use
+   * testConnection() to check that the terminal is reachable.
    *
    * @param registerId Register ID (2 digits)
    * @param cashierId  Cashier ID (5 digits)
    */
   async networkTest(
-    registerId: string,
-    cashierId: string
+    _registerId: string,
+    _cashierId: string
   ): Promise<NetworkTestResult> {
-    const ncai = registerId + cashierId;
-    const tlv = buildNetworkTestRequest(ncai, this.generateSequence());
-    const start = Date.now();
-
-    try {
-      const raw = await getNativeModule().sendPaymentRequest(
-        this.config.host,
-        this.config.port,
-        tlv,
-        10000 // short timeout — terminal should answer immediately
-      );
-
-      const fields = parseTlv(raw);
-      const responseCode = fields[TLV_TAGS.CR] ?? '';
-      const rttMs = Date.now() - start;
-
-      return {
-        success: responseCode === '000',
-        responseCode,
-        rttMs,
-        error: responseCode !== '000'
-          ? `Network test failed with code: ${responseCode}`
-          : undefined,
-      };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return { success: false, responseCode: '', error: message };
-    }
+    return {
+      success: false,
+      responseCode: 'UNSUPPORTED',
+      error:
+        "Network test not supported over TCP (the terminal's payment app does not implement TM 009)",
+    };
   }
 
   /**
@@ -324,7 +306,8 @@ export class NapsPayClient {
    * @param stan       STAN of the transaction to cancel
    * @param registerId Register ID (2 digits)
    * @param cashierId  Cashier ID (5 digits)
-   * @param sequence   Sequence number of the original transaction
+   * @param sequence   Sequence number of the original transaction, sent as NSA (TAG 005);
+   *                   the void itself gets a new sequence (NS), repeated in TM=004
    * @param amountCentimes  Original amount in centimes (required for v5.4.4+)
    */
   async cancelPayment(
@@ -335,7 +318,8 @@ export class NapsPayClient {
     amountCentimes?: number
   ): Promise<CancellationResult> {
     const ncai = registerId + cashierId;
-    const tlv = buildCancellationRequest(stan, ncai, sequence, amountCentimes);
+    const voidSequence = this.generateSequence();
+    const tlv = buildCancellationRequest(stan, ncai, voidSequence, amountCentimes, sequence);
 
     try {
       // Phase 1: send TM=003, keep connection open — terminal replies MT=103 immediately
@@ -354,7 +338,7 @@ export class NapsPayClient {
 
       // MT=104 direct means already finalised (shouldn't normally happen)
       if (mt1 === MESSAGE_TYPES.CANCELLATION_CONFIRMATION_RESPONSE) {
-        return this.buildVoidResult(fields1, fields1[TLV_TAGS.STAN], merchantReceipt);
+        return this.buildVoidResult(fields1, fields1[TLV_TAGS.STAN], undefined);
       }
 
       if (mt1 !== MESSAGE_TYPES.CANCELLATION_RESPONSE || cr1 !== '000') {
@@ -368,12 +352,17 @@ export class NapsPayClient {
 
       // Phase 2: send TM=004 confirmation on the same connection → MT=104.
       // NS (TAG 004) carries the same sequence as the TM=003 (spec §4.4: 004.NS = 003.NS).
-      // Echo the amount (TAG 002) from the MT=103 response — required by v5.4.4+.
+      // Echo MT/DE and DATR/HETR from the MT=103 response — MT is required by v5.4.4+.
       const confirmTlv = buildCancellationConfirmation(
         fields1[TLV_TAGS.STAN] ?? stan,
         ncai,
-        sequence,
-        fields1[TLV_TAGS.MT]
+        voidSequence,
+        {
+          amount: fields1[TLV_TAGS.MT],
+          currency: fields1[TLV_TAGS.DE],
+          datr: fields1[TLV_TAGS.DATR],
+          hetr: fields1[TLV_TAGS.HETR],
+        }
       );
       let raw2: string;
       try {
@@ -471,7 +460,7 @@ export class NapsPayClient {
         this.config.host,
         this.config.port,
         tlv,
-        10000
+        this.config.timeout
       );
 
       const fields = parseTlv(raw);
@@ -656,7 +645,10 @@ export class NapsPayClient {
   }
 
   /**
-   * Build cancellation result from the MT=104 reply (spec §4.4):
+   * Build cancellation result from the MT=104 reply (spec §4.4).
+   * Receipts: MT=103 DP = merchant copy, MT=104 DP = customer copy; when MT=103 has
+   * no DP, the MT=104 DP is the merchant copy and there is no customer copy.
+   * Response codes:
    * CR=480 or 000 = completed; CR=995 = unconfirmed (seen with successful voids
    * on the live terminal) → pending, verify by STAN; anything else = failed.
    */
@@ -670,12 +662,17 @@ export class NapsPayClient {
     const success = cr === '000' || cr === '480';
     const pending = cr === '995';
 
+    // No receipt with MT=103 (Ingenico Lane3600, Sunmi P2): the MT=104 receipt is the
+    // merchant copy ("Copie Commerçant") and there is no customer copy.
+    const merchant = merchantReceipt ?? (dp ? parseReceipt(dp, ReceiptType.MERCHANT) : undefined);
+    const customer = merchantReceipt && dp ? parseReceipt(dp, ReceiptType.CUSTOMER) : undefined;
+
     return {
       success,
       responseCode: cr,
       stan: fields[TLV_TAGS.STAN] ?? fallbackStan,
-      merchantReceipt,
-      customerReceipt: dp ? parseReceipt(dp, ReceiptType.CUSTOMER) : undefined,
+      merchantReceipt: merchant,
+      customerReceipt: customer,
       pendingConfirmation: pending || undefined,
       error: success
         ? undefined

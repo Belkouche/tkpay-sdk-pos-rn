@@ -45,7 +45,7 @@ class TkpayNaps: NSObject {
 
             } catch {
                 self.closeConnection()
-                reject("CONNECTION_ERROR", error.localizedDescription, error)
+                reject(Self.errorCode(error), error.localizedDescription, error)
             }
         }
     }
@@ -84,7 +84,7 @@ class TkpayNaps: NSObject {
 
             } catch {
                 self.closeConnection()
-                reject("CONNECTION_ERROR", error.localizedDescription, error)
+                reject(Self.errorCode(error), error.localizedDescription, error)
             }
         }
     }
@@ -195,8 +195,9 @@ class TkpayNaps: NSObject {
         }
     }
 
-    // NapsPay uses '!' as the end-of-message terminator on TCP responses.
-    // We read until '!' is seen, using 1-second inter-chunk silence as fallback.
+    // A reply is complete when walking its TLV fields by length lands on '!' or '?'
+    // (TlvFraming); a terminator inside a value (receipt lines end with '?') is data.
+    // 1-second inter-chunk silence is the fallback. Replies over 64 KB are rejected.
     private func receiveResponse(timeout: Int) throws -> String {
         guard let inputStream = inputStream else {
             throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "No input stream"])
@@ -233,10 +234,9 @@ class TkpayNaps: NSObject {
             throw inputStream.streamError ?? NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Read failed"])
         }
 
-        // Drain until '!' or '?' terminator, or 1-second silence
-        let bangByte = UInt8(ascii: "!")
-        let questionByte = UInt8(ascii: "?")
-        while !response.contains(bangByte) && !response.contains(questionByte) {
+        // Drain until the reply is complete, or 1-second silence
+        var complete = try TlvFraming.isReplyEnd(response)
+        while !complete {
             let drainEnd = Date().addingTimeInterval(1.0)
             var gotData = false
             while Date() < drainEnd {
@@ -245,25 +245,25 @@ class TkpayNaps: NSObject {
                     if n > 0 {
                         response.append(contentsOf: buffer[0..<n])
                         gotData = true
-                        break
-                    } else {
-                        break
                     }
+                    break
                 }
                 Thread.sleep(forTimeInterval: 0.05)
             }
             if !gotData { break }
+            complete = try TlvFraming.isReplyEnd(response)
         }
 
         guard let responseString = String(data: response, encoding: .utf8), !responseString.isEmpty else {
             throw NSError(domain: "TkpayNaps", code: -1, userInfo: [NSLocalizedDescriptionKey: "Empty response"])
         }
 
-        // Strip trailing terminator ('!' or '?') if present — TLV parser doesn't expect it
-        if responseString.last == "!" || responseString.last == "?" {
-            return String(responseString.dropLast())
-        }
-        return responseString
+        // Strip the terminator of a complete reply; after a silence the last '?' may be the DP's own
+        return complete ? String(responseString.dropLast()) : responseString
+    }
+
+    private static func errorCode(_ error: Error) -> String {
+        error is TlvFraming.ResponseTooLarge ? "INVALID_RESPONSE" : "CONNECTION_ERROR"
     }
 
     private func closeConnection() {

@@ -4,14 +4,18 @@
  *
  * Same semantics as the Android/iOS modules: sendPaymentRequest opens a new
  * TCP connection and keeps it open; sendConfirmation reuses it, then closes
- * it. A response ends at the '!' / '?' terminator or after 1 s of silence, and
- * is decoded as UTF-8 like the native modules.
+ * it. A response ends at a '!' / '?' terminator on a TLV field boundary
+ * (isCompleteMessage) or after 1 s of silence, is capped at 64 KB, and is
+ * decoded as UTF-8 like the native modules.
  *
  * Requiring this file installs it as `react-native`.
  */
 
 const net = require('net');
 const Module = require('module');
+const path = require('path');
+// Framing check from the compiled SDK (TlvProtocol has no react-native dependency)
+const { isCompleteMessage, MAX_RESPONSE_CHARS } = require(path.join(__dirname, '..', '..', 'lib', 'TlvProtocol'));
 
 let socket = null;
 const sent = [];
@@ -29,11 +33,19 @@ function readFrame(s, timeout) {
     };
     const timer = setTimeout(() => done(null, new Error('Timeout waiting for response')), timeout);
     const text = () => Buffer.concat(chunks).toString('utf8');
+    let size = 0;
     s.on('data', (chunk) => {
       chunks.push(chunk);
+      size += chunk.length;
       clearTimeout(silence);
+      if (size > MAX_RESPONSE_CHARS) {
+        const error = new Error(`Response larger than ${MAX_RESPONSE_CHARS} bytes`);
+        error.code = 'INVALID_RESPONSE';
+        return done(null, error);
+      }
       const last = chunk[chunk.length - 1];
-      if (last === 0x21 || last === 0x3f) return done(text().slice(0, -1)); // '!' / '?'
+      // '!' / '?' ends the reply only on a field boundary (not inside a receipt line)
+      if ((last === 0x21 || last === 0x3f) && isCompleteMessage(text())) return done(text().slice(0, -1));
       silence = setTimeout(() => done(text()), 1000);
     });
     s.on('error', (e) => done(null, e));

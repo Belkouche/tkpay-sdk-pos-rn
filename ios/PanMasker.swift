@@ -3,10 +3,13 @@ import Foundation
 /// Masks card numbers in a raw terminal reply before it crosses the bridge to JS.
 ///
 /// - Tag 007 (NCAR): every digit except the first 6 and last 4 becomes '*'.
-/// - Tag 010 (DP): in each line's text (sub-tag 033), every card-shaped run is
+/// - Tag 010 (DP): in every sub-tag value (and any unparseable rest), every card-shaped run is
 ///   masked the same way. A card-shaped run is 13+ digits where consecutive
 ///   digits are adjacent or separated by exactly one space, dash, dot, tab or
 ///   non-breaking space; runs over 19 digits are masked too.
+///
+/// If the field walk breaks (not TLV, or a field longer than the reply), every
+/// card-shaped run in the rest of the reply is masked (fail closed).
 ///
 /// Digits are replaced one for one, so the reply length, every TLV length and
 /// the receipt layout stay unchanged. Works on UTF-16 code units, like the JS
@@ -18,17 +21,29 @@ enum PanMasker {
     static func maskReply(_ reply: String) -> String {
         var units = Array(reply.utf16)
         var i = 0
+        var previousValueStart = 0
         while i + 6 <= units.count {
             if units[i] == UInt16(UInt8(ascii: "!")) || units[i] == UInt16(UInt8(ascii: "?")) { break }
-            guard let tag = number(units, i, 3), let length = number(units, i + 3, 3) else { break }
+            // Same field walk as the reader: a DP declared 999 runs to its own '?'
+            let end = TlvFraming.fieldEnd(units, i)
+            guard end >= 0, end <= units.count, let tag = number(units, i, 3) else {
+                // Fail closed: the walk broke. Mask every card-shaped run in the whole rest in one
+                // pass first, from the previous field's value (lengths are untrusted: a number may
+                // straddle a declared end), then the receipt sub-tag values of a DP up to
+                // min(declared end, reply length).
+                maskRuns(&units, previousValueStart, units.count)
+                if TlvFraming.number(units, i, 3) == 10, let length = TlvFraming.number(units, i + 3, 3) {
+                    maskReceiptBlock(&units, i + 6, min(i + 6 + length, units.count))
+                }
+                break
+            }
             let start = i + 6
-            let end = start + length
-            if end > units.count { break }
             if tag == 7 {
                 maskDigits(&units, start, end)
             } else if tag == 10 {
                 maskReceiptBlock(&units, start, end)
             }
+            previousValueStart = start
             i = end
         }
         return String(decoding: units, as: UTF16.self)
@@ -53,7 +68,7 @@ enum PanMasker {
                 maskRuns(&units, i, end)
                 return
             }
-            if number(units, i, 3) == 33 { maskRuns(&units, i + 6, i + 6 + length) }
+            maskRuns(&units, i + 6, i + 6 + length)
             i += 6 + length
         }
     }

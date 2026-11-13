@@ -64,7 +64,7 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
 
             } catch (e: Exception) {
                 closeConnection()
-                promise.reject("CONNECTION_ERROR", e.message, e)
+                promise.reject(errorCode(e), e.message, e)
             }
         }
     }
@@ -102,7 +102,7 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
 
             } catch (e: Exception) {
                 closeConnection()
-                promise.reject("CONNECTION_ERROR", e.message, e)
+                promise.reject(errorCode(e), e.message, e)
             }
         }
     }
@@ -134,43 +134,49 @@ class TkpayNapsModule(reactContext: ReactApplicationContext) :
      *   - Some send nothing and just stop writing
      *
      * Strategy: read with full timeout for the first byte, then drain with
-     * a 1-second inter-chunk timeout. Stop immediately on '!' or '?'.
-     * Strip the terminator before returning so the TLV parser sees clean data.
+     * a 1-second inter-chunk timeout. The reply is complete when walking its
+     * TLV fields by length lands on '!' or '?' (TlvFraming); a terminator inside
+     * a value (receipt lines end with '?') is data. Replies over 64 KB are
+     * rejected. The terminator of a complete reply is stripped.
      */
     private fun receiveResponse(timeout: Int): String {
         val stream = inputStream ?: throw IllegalStateException("No active socket")
         val socket = activeSocket ?: throw IllegalStateException("No active socket")
-        val rawBytes = mutableListOf<Byte>()
+        val raw = java.io.ByteArrayOutputStream()
         val buf = ByteArray(8192)
 
         // First read — full timeout (payment waits for customer to tap)
         socket.soTimeout = timeout
         val firstCount = stream.read(buf)
         if (firstCount == -1) throw IllegalStateException("Connection closed by terminal")
-        for (i in 0 until firstCount) rawBytes.add(buf[i])
+        raw.write(buf, 0, firstCount)
 
-        // Drain until '!' / '?' terminator or 1-second silence
+        // Drain until the reply is complete or 1-second silence
         socket.soTimeout = 1000
-        while (rawBytes.last() != '!'.code.toByte() && rawBytes.last() != '?'.code.toByte()) {
+        var complete = TlvFraming.isReplyEnd(raw.toByteArray(), raw.size())
+        while (!complete) {
             try {
                 val n = stream.read(buf)
                 if (n <= 0) break
-                for (i in 0 until n) rawBytes.add(buf[i])
+                raw.write(buf, 0, n)
             } catch (e: java.net.SocketTimeoutException) {
                 break
             }
+            complete = TlvFraming.isReplyEnd(raw.toByteArray(), raw.size())
         }
 
         socket.soTimeout = timeout
 
-        if (rawBytes.isEmpty()) throw IllegalStateException("Empty response from terminal")
+        if (raw.size() == 0) throw IllegalStateException("Empty response from terminal")
 
-        val response = String(rawBytes.toByteArray(), Charsets.UTF_8)
+        val response = String(raw.toByteArray(), Charsets.UTF_8)
 
-        // Strip terminator if present
-        return if (response.last() == '!' || response.last() == '?')
-            response.dropLast(1) else response
+        // Strip the terminator of a complete reply; after a silence the last '?' may be the DP's own
+        return if (complete) response.dropLast(1) else response
     }
+
+    private fun errorCode(e: Exception) =
+        if (e is InvalidResponseException) "INVALID_RESPONSE" else "CONNECTION_ERROR"
 
     /**
      * Close active connection

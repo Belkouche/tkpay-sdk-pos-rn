@@ -4,10 +4,13 @@ package ma.tkpay.naps
  * Masks card numbers in a raw terminal reply before it crosses the bridge to JS.
  *
  * - Tag 007 (NCAR): every digit except the first 6 and last 4 becomes '*'.
- * - Tag 010 (DP): in each line's text (sub-tag 033), every card-shaped run is
+ * - Tag 010 (DP): in every sub-tag value (and any unparseable rest), every card-shaped run is
  *   masked the same way. A card-shaped run is 13+ digits where consecutive
  *   digits are adjacent or separated by exactly one space, dash, dot, tab or
  *   non-breaking space; runs over 19 digits are masked too.
+ *
+ * If the field walk breaks (not TLV, or a field longer than the reply), every
+ * card-shaped run in the rest of the reply is masked (fail closed).
  *
  * Digits are replaced one for one, so the reply length, every TLV length and
  * the receipt layout stay unchanged. Same rule as the JS layer (TlvProtocol.ts).
@@ -15,24 +18,35 @@ package ma.tkpay.naps
 internal object PanMasker {
     private const val TAG_NCAR = "007"
     private const val TAG_DP = "010"
-    private const val TAG_CONTENT = "033"
     private const val MIN_RUN_DIGITS = 13
 
     fun maskReply(reply: String): String {
         val out = StringBuilder(reply)
         var i = 0
+        var previousValueStart = 0
         while (i + 6 <= reply.length) {
             if (reply[i] == '!' || reply[i] == '?') break
+            // Same field walk as the reader: a DP declared 999 runs to its own '?'
+            val end = TlvFraming.fieldEnd(reply, i)
+            if (end < 0 || end > reply.length) {
+                // Fail closed: the walk broke. Mask every card-shaped run in the whole rest in one
+                // pass first, from the previous field's value (lengths are untrusted: a number may
+                // straddle a declared end), then the receipt sub-tag values of a DP up to
+                // min(declared end, reply length).
+                maskRuns(out, previousValueStart, reply.length)
+                if (reply.startsWith(TAG_DP, i) && reply.substring(i + 3, i + 6).all { it in '0'..'9' }) {
+                    val dpEnd = minOf(i + 6 + reply.substring(i + 3, i + 6).toInt(), reply.length)
+                    maskReceiptBlock(out, i + 6, dpEnd)
+                }
+                break
+            }
             val tag = reply.substring(i, i + 3)
-            val lengthStr = reply.substring(i + 3, i + 6)
-            if (!tag.all { it in '0'..'9' } || !lengthStr.all { it in '0'..'9' }) break
             val start = i + 6
-            val end = start + lengthStr.toInt()
-            if (end > reply.length) break
             when (tag) {
                 TAG_NCAR -> maskDigits(out, start, end)
                 TAG_DP -> maskReceiptBlock(out, start, end)
             }
+            previousValueStart = start
             i = end
         }
         return out.toString()
@@ -59,7 +73,7 @@ internal object PanMasker {
                 maskRuns(out, i, end)
                 return
             }
-            if (out.substring(i, i + 3) == TAG_CONTENT) maskRuns(out, i + 6, valueEnd)
+            maskRuns(out, i + 6, valueEnd)
             i = valueEnd
         }
     }

@@ -265,58 +265,91 @@ export function buildSettlementRequest(ncai: string): string {
 }
 
 /**
- * Build cancellation request TLV (TM=003)
+ * Build cancellation request TLV (TM=003, spec v2 §4.3)
  *
+ * Fields: TM, NCAI, NS, DA, HE, DATR, HETR, STAN, [MT], [NSA].
+ * NS is a new sequence for the void; NSA is the sequence of the payment to void.
  * NapsPay v5.4.4+ requires the original amount (TAG 002) in the frame.
- * Pass `amountCentimes` when targeting v5.4.4+.
  *
  * @param stan   STAN of the transaction to cancel
  * @param ncai   Register(2) + Cashier(5)
- * @param sequence  Original sequence number
+ * @param sequence  NS of this void (new sequence; TM=004 repeats it)
  * @param amountCentimes  Original amount in centimes (required for v5.4.4+)
+ * @param originalSequence  Sequence of the payment to void, sent as NSA (TAG 005)
  */
 export function buildCancellationRequest(
   stan: string,
   ncai: string,
   sequence: string,
-  amountCentimes?: number
+  amountCentimes?: number,
+  originalSequence?: string
 ): string {
-  let msg = buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_REQUEST);
+  const date = getCurrentDate();
+  const time = getCurrentTime();
+  let msg =
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_REQUEST) +
+    buildField(TLV_TAGS.NCAI, ncai) +
+    buildField(TLV_TAGS.NS, sequence) +
+    buildField(TLV_TAGS.DA, date) +
+    buildField(TLV_TAGS.HE, time) +
+    buildField(TLV_TAGS.DATR, date) +
+    buildField(TLV_TAGS.HETR, time) +
+    buildField(TLV_TAGS.STAN, stan);
   if (amountCentimes !== undefined) {
     msg += buildField(TLV_TAGS.MT, amountCentimes.toString());
   }
-  msg +=
-    buildField(TLV_TAGS.STAN, stan) +
-    buildField(TLV_TAGS.NCAI, ncai) +
-    buildField(TLV_TAGS.NSA, sequence) +
-    buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime());
+  if (originalSequence) {
+    msg += buildField(TLV_TAGS.NSA, originalSequence);
+  }
   return msg;
 }
 
 /**
- * Build cancellation confirmation request TLV (TM=004)
+ * Values echoed from the MT=103 reply into the TM=004 confirmation.
+ */
+export interface CancellationConfirmationOptions {
+  /** MT (TAG 002) echoed verbatim from MT=103 — required by NapsPay v5.4.4+. */
+  amount?: string;
+  /** DE (TAG 012) echoed from MT=103; default "504" (MAD). Sent only with MT. */
+  currency?: string;
+  /** DATR / HETR (TAGs 018/019) echoed from MT=103. */
+  datr?: string;
+  hetr?: string;
+}
+
+/**
+ * Build cancellation confirmation request TLV (TM=004, spec v2 §4.4)
  * Sent on the same connection after receiving MT=103 from TM=003.
  *
- * @param amount  Amount echoed from the MT=103 response (TAG 002, 12-digit) —
- *                required by NapsPay v5.4.4+
+ * Fields: TM, NCAI, NS (same as the TM=003), STAN, [MT, DE], [DATR], [HETR], DA, HE. No NSA.
+ * A string in place of `options` is the MT=103 amount (earlier signature).
  */
 export function buildCancellationConfirmation(
   stan: string,
   ncai: string,
   sequence: string,
-  amount?: string
+  options: CancellationConfirmationOptions | string = {}
 ): string {
-  let msg = buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_CONFIRMATION_REQUEST);
-  if (amount !== undefined) {
-    msg += buildField(TLV_TAGS.MT, amount);
+  if (typeof options === 'string') {
+    options = { amount: options };
   }
-  msg +=
-    buildField(TLV_TAGS.STAN, stan) +
+  let msg =
+    buildField(TLV_TAGS.TM, MESSAGE_TYPES.CANCELLATION_CONFIRMATION_REQUEST) +
     buildField(TLV_TAGS.NCAI, ncai) +
     buildField(TLV_TAGS.NS, sequence) +
-    buildField(TLV_TAGS.DA, getCurrentDate()) +
-    buildField(TLV_TAGS.HE, getCurrentTime());
+    buildField(TLV_TAGS.STAN, stan);
+  if (options.amount) {
+    msg +=
+      buildField(TLV_TAGS.MT, options.amount) +
+      buildField(TLV_TAGS.DE, options.currency || CURRENCY.MAD);
+  }
+  if (options.datr) {
+    msg += buildField(TLV_TAGS.DATR, options.datr);
+  }
+  if (options.hetr) {
+    msg += buildField(TLV_TAGS.HETR, options.hetr);
+  }
+  msg += buildField(TLV_TAGS.DA, getCurrentDate()) + buildField(TLV_TAGS.HE, getCurrentTime());
   return msg;
 }
 
@@ -447,39 +480,86 @@ export function maskCardNumbersInText(text: string): string {
   return text.replace(CARD_RUN, maskDigits);
 }
 
+const DIGITS3 = /^[0-9]{3}$/;
+const DIGITS6 = /^[0-9]{6}$/;
+
+/**
+ * End index (exclusive) of the TLV field starting at `pos`, or -1 if its header is not
+ * 3 + 3 ASCII digits. The result can be past `data.length` when the field is not fully
+ * received yet. A DP (010) declared 999 long (the Ingenico Lane3600 caps the DP length at
+ * 999 when the receipt is longer) ends at its own '?' end marker, found by walking its
+ * receipt sub-tags (030-039) and '*' line separators; the value includes that '?'. Any
+ * other sub-record ends the walk at the declared length.
+ * Shared by parseTlv and isCompleteMessage (the reader check).
+ */
+export function fieldEnd(data: string, pos: number): number {
+  const tag = data.substring(pos, pos + 3);
+  const lengthStr = data.substring(pos + 3, pos + 6);
+  if (!DIGITS3.test(tag) || !DIGITS3.test(lengthStr)) return -1;
+  const declaredEnd = pos + 6 + parseInt(lengthStr, 10);
+  if (tag !== TLV_TAGS.DP || lengthStr !== '999') return declaredEnd;
+
+  let i = pos + 6;
+  while (i < data.length) {
+    if (data[i] === '*') {
+      i++;
+      continue;
+    }
+    if (data[i] === '?') return Math.max(i + 1, declaredEnd);
+    const sub = data.substring(i, i + 6);
+    if (sub.length < 6) return data.length + 1; // rest of the receipt not received yet
+    // Only receipt sub-tags (030-039): anything else (e.g. a top-level 013 or 007 after a DP
+    // that really is 999 long, with no '?') is not part of the DP.
+    if (!DIGITS6.test(sub) || !sub.startsWith('03')) return declaredEnd;
+    i += 6 + parseInt(sub.substring(3), 10);
+  }
+  return data.length + 1;
+}
+
+/** Largest reply accepted, in characters (replies seen are ~2 KB). */
+export const MAX_RESPONSE_CHARS = 64 * 1024;
+
+/**
+ * True once `buf` holds a complete reply: walking the fields by their length lands on a
+ * '!' (v2) or '?' (v1) terminator. A terminator inside a value (receipt lines end with '?',
+ * text may contain '!') is data. If the data is not TLV, a trailing terminator ends it.
+ * Readers call this only when the data ends with '!' or '?', and keep a silence fallback
+ * for replies without a terminator.
+ */
+export function isCompleteMessage(buf: string): boolean {
+  let pos = 0;
+  while (pos < buf.length) {
+    if (buf[pos] === '!' || buf[pos] === '?') return true;
+    if (pos + 6 > buf.length) return false;
+    const end = fieldEnd(buf, pos);
+    if (end < 0) return /[!?]$/.test(buf);
+    pos = end;
+  }
+  return false;
+}
+
 /**
  * Parse TLV string into fields map
  */
 export function parseTlv(tlvString: string): Record<string, string> {
   const fields: Record<string, string> = {};
 
-  // Values are length-delimited, so a '!' or '?' inside one (a DP block ends
-  // with '?', receipt text may contain '!') is data. The end-of-message
-  // terminator ('!' v2, '?' v1) only counts where a tag is expected; anything
-  // after it is ignored. Both are accepted so the parser stays protocol-version
-  // agnostic even if the native layer did not strip them.
+  // Fields are walked by their length (fieldEnd), so a '!' or '?' inside a value (a DP
+  // block ends with '?', receipt text may contain '!') is data. The end-of-message
+  // terminator ('!' v2, '?' v1) only counts where a tag is expected; anything after it
+  // is ignored. Malformed input ends the walk; it never throws.
   const data = tlvString;
 
   let index = 0;
 
-  while (index < data.length) {
+  while (index + 6 <= data.length) {
     if (data[index] === '!' || data[index] === '?') break;
 
-    // Need at least 6 chars for tag + length
-    if (index + 6 > data.length) break;
+    const end = fieldEnd(data, index);
+    if (end < 0 || end > data.length) break;
 
     const tag = data.substring(index, index + 3);
-    const lengthStr = data.substring(index + 3, index + 6);
-
-    // Both tag and length must be 3-digit numeric strings
-    if (!/^\d{3}$/.test(tag) || !/^\d{3}$/.test(lengthStr)) break;
-
-    const length = parseInt(lengthStr, 10);
-
-    // Check if we have enough data for the value
-    if (index + 6 + length > data.length) break;
-
-    let value = data.substring(index + 6, index + 6 + length);
+    let value = data.substring(index + 6, end);
 
     // SECURITY: Immediately mask card numbers in tag 007 (NCAR) and the DP receipt text
     if (tag === TLV_TAGS.NCAR) {
@@ -489,14 +569,14 @@ export function parseTlv(tlvString: string): Record<string, string> {
     }
 
     fields[tag] = value;
-    index += 6 + length;
+    index = end;
   }
 
   return fields;
 }
 
 /**
- * Mask card numbers in the text (DP4, tag 033) of every line of a DP block.
+ * Mask card numbers in every sub-tag value of a DP block, and in any unparseable remainder.
  * Digits are replaced one for one, so sub-tag headers and lengths are unchanged.
  * Same walk as the native modules' PanMasker.
  */
@@ -514,13 +594,13 @@ function maskReceiptBlock(dpValue: string): string {
     const tag = dpValue.substring(index, index + 3);
     const lengthStr = dpValue.substring(index + 3, index + 6);
     const length = parseInt(lengthStr, 10);
-    if (index + 6 > dpValue.length || !/^\d{3}$/.test(lengthStr) || index + 6 + length > dpValue.length) {
+    if (index + 6 > dpValue.length || !DIGITS3.test(lengthStr) || index + 6 + length > dpValue.length) {
       // Not a sub-tag: mask what is left as plain text
       return out + maskCardNumbersInText(dpValue.substring(index));
     }
 
     const value = dpValue.substring(index + 6, index + 6 + length);
-    out += tag + lengthStr + (tag === RECEIPT_TAGS.CONTENT ? maskCardNumbersInText(value) : value);
+    out += tag + lengthStr + maskCardNumbersInText(value);
     index += 6 + length;
   }
 
@@ -568,7 +648,7 @@ export function parseReceipt(dpValue: string, type: ReceiptType): Receipt {
     const tag = dpValue.substring(index, index + 3);
     const lengthStr = dpValue.substring(index + 3, index + 6);
 
-    if (!/^\d+$/.test(lengthStr)) break;
+    if (!DIGITS3.test(lengthStr)) break;
 
     const length = parseInt(lengthStr, 10);
 

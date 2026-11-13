@@ -47,6 +47,9 @@ export {
   buildTotalsRequest,
   parseTlv,
   parseReceipt,
+  fieldEnd,
+  isCompleteMessage,
+  MAX_RESPONSE_CHARS,
   receiptToPlainText,
   maskCardNumbersInText,
   describeResponseCode,
@@ -54,4 +57,5 @@ export {
   APPROVED_CODES,
   RESPONSE_CODES,
   type ConfirmationOptions,
+  type CancellationConfirmationOptions,
 } from './TlvProtocol';
