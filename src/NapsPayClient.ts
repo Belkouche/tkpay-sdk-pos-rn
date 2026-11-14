@@ -27,7 +27,6 @@ import {
 import {
   buildPaymentRequest,
   buildConfirmationRequest,
-  buildSettlementRequest,
   buildCancellationRequest,
   buildCancellationConfirmation,
   buildDuplicateRequest,
@@ -214,42 +213,24 @@ export class NapsPayClient {
   }
 
   /**
-   * Force end-of-day settlement (telecollecte) — TM=010
+   * Telecollecte is not part of the NapsPay ECR protocol.
    *
-   * Sends batch totals to the NAPS server. The terminal must be idle
-   * ("Attente Caisse") and referencing must have run at least once.
+   * Sends nothing and returns `success: false` with `responseCode: 'UNSUPPORTED'`.
+   * Spec v2.0 §4.7 defines TM=010 as Payment Totals: the terminal prints the daily
+   * totals ticket and closes no batch. Run the telecollecte from the terminal menu.
+   * Use totals() for the daily totals ticket.
    *
+   * @deprecated Telecollecte cannot be triggered over the ECR protocol. Use totals().
    * @param registerId Register ID (2 digits)
    * @param cashierId Cashier ID (5 digits)
    */
-  async settlement(registerId: string, cashierId: string): Promise<SettlementResult> {
-    const ncai = registerId + cashierId;
-    const settlementTlv = buildSettlementRequest(ncai);
-
-    try {
-      const response = await getNativeModule().sendPaymentRequest(
-        this.config.host,
-        this.config.port,
-        settlementTlv,
-        this.config.timeout
-      );
-
-      const fields = parseTlv(response);
-      const responseCode = fields[TLV_TAGS.CR] ?? '';
-      const dpValue = fields[TLV_TAGS.DP];
-
-      return {
-        success: responseCode === '000',
-        responseCode,
-        date: fields[TLV_TAGS.DA],
-        time: fields[TLV_TAGS.HE],
-        receipt: dpValue ? parseReceipt(dpValue, ReceiptType.MERCHANT) : undefined,
-        error: responseCode !== '000' ? `Settlement failed with code: ${responseCode}` : undefined,
-      };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return { success: false, responseCode: '', error: message };
-    }
+  async settlement(_registerId: string, _cashierId: string): Promise<SettlementResult> {
+    return {
+      success: false,
+      responseCode: 'UNSUPPORTED',
+      error:
+        'Telecollecte is not part of the NapsPay ECR protocol: run it from the terminal menu. Use totals() for the daily totals ticket.',
+    };
   }
 
   /**

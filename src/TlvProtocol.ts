@@ -254,6 +254,9 @@ export function buildConfirmationRequest(
 
 /**
  * Build settlement request TLV (TM=010)
+ *
+ * @deprecated TM=010 is Payment Totals (spec v2.0 §4.7): it closes no batch, and
+ * telecollecte is not part of the ECR protocol. Use buildTotalsRequest().
  */
 export function buildSettlementRequest(ncai: string): string {
   return (

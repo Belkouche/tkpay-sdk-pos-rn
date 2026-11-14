@@ -288,7 +288,7 @@ if (sale.success && sale.merchantReceipt) console.log(receiptToPlainText(sale.me
 
 ### `totals`
 
-TM 010 with a sequence number. Reads the terminal's running batch totals.
+TM 010 (Payment Totals, spec v2.0 §4.7). Returns the terminal's daily totals ticket. It closes no batch.
 
 ```typescript
 const tot = await client.totals('01', '00001');
@@ -297,12 +297,10 @@ if (tot.success && tot.receipt) console.log(receiptToPlainText(tot.receipt));
 
 ### `settlement`
 
-TM 010. End-of-day settlement (télécollecte). The terminal must be idle and referenced.
-
-```typescript
-const settle = await client.settlement('01', '00001');
-console.log(settle.success ? `Settled ${settle.date} ${settle.time}` : settle.error);
-```
+Deprecated. Télécollecte is not part of the NapsPay ECR protocol: spec v2.0 §4.7 defines TM 010 as
+Payment Totals, not settlement. Run the télécollecte from the terminal's menu. `settlement()` sends
+nothing and returns `success: false`, `responseCode: 'UNSUPPORTED'`. Use `totals()` for the daily
+totals ticket.
 
 ### `resetPinPad`
 
@@ -351,7 +349,7 @@ interface Receipt {
 | `cancelPayment` | `merchantReceipt` (ends "ANNULATION", "Copie Commercant") | TM 103, also kept on a pending void; TM 104 when TM 103 has no receipt |
 | `cancelPayment` | `customerReceipt` (ends "ANNULATION", "Copie Client") | TM 104, only when TM 103 had a receipt |
 | `printDuplicate` | `merchantReceipt` | TM 108, as sent |
-| `totals` / `settlement` | `receipt` | TM 110, as sent |
+| `totals` | `receipt` | TM 110, as sent |
 | `referencing` | `receipt` | TM 113, as sent |
 
 **Printing a copy**
@@ -591,7 +589,7 @@ refused confirmation). Do not void it again.
 or may not have happened. Call `printDuplicate(registerId, cashierId, saleStan)` and check the
 receipt before refunding the customer or retrying. A retry on an already-voided sale returns 482.
 
-**Settlement fails**: the terminal must be idle and referenced. A second settlement on the same day may be refused.
+**Settlement returns UNSUPPORTED**: télécollecte is not part of the ECR protocol. Run it from the terminal's menu.
 
 ---
 

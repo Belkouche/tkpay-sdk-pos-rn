@@ -171,12 +171,3 @@ test('parseTlv keeps a DP block that ends with "?" or contains "!"', () => {
   const receipt = parseReceipt(fields['010'], ReceiptType.CUSTOMER);
   assert.deepEqual(receipt.lines.map((l) => l.text), ['MERCI DE VOTRE VISITE !', 'A BIENTOT']);
 });
-
-test('settlement() returns the TM 110 receipt', async () => {
-  nativeResponses = [buildField('001', '110') + buildField('013', '000') + buildField('010', line('01', 'G', 'C', 'TELECOLLECTE OK'))];
-  const client = new NapsPayClient({ host: '127.0.0.1' });
-  const result = await client.settlement('01', '00001');
-
-  assert.equal(result.success, true);
-  assert.deepEqual(result.receipt.lines.map((l) => l.text), ['TELECOLLECTE OK']);
-});
