@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.7.0] - 2026-11-14
 
 Port of the fixes verified live with the Node and C# SDKs on an Ingenico Lane3600 (USB) and a
 Sunmi P2 (TCP). This SDK is TCP only, so the USB serial fixes of those SDKs do not apply.
@@ -22,6 +22,9 @@ Sunmi P2 (TCP). This SDK is TCP only, so the USB serial fixes of those SDKs do n
 - **Card number masking:** DP masking (JS and native) covers every sub-tag value and any unparseable rest, not only the text (033). The native `PanMasker` now fails closed: if the field walk breaks, every card-shaped run in the rest of the reply is masked.
 - **`networkTest()` sends nothing over TCP** and returns `success: false`, `responseCode: 'UNSUPPORTED'`. The NapsPay app on Sunmi terminals answers TM 009 with TM 101 / CR 902, and a test frame crashed the app on a Sunmi P2.
 - `resetPinPad()` used a fixed 10 s timeout; it now uses `timeout` like the other management operations.
+
+### Changed
+- **`settlement()` no longer sends TM 010 nor reports a télécollecte that never happened.** The NapsPay ECR TLV spec v2.0 has no settlement message: §4.7 defines TM 010 / 110 as Payment Totals. Verified on a Sunmi P2: TM 010 returned CR 000 and the same totals ticket twice, with unchanged totals, so no batch was closed. `settlement()` now sends nothing (no connection opened) and returns `success: false`, `responseCode: 'UNSUPPORTED'`, no date, time or receipt. It is deprecated, as are `buildSettlementRequest` and `MESSAGE_TYPES.SETTLEMENT_REQUEST` / `SETTLEMENT_RESPONSE`. Run the télécollecte from the terminal's menu; use `totals()` for the daily totals ticket.
 
 ### Added
 - `fieldEnd`, `isCompleteMessage`, `MAX_RESPONSE_CHARS` and the `CancellationConfirmationOptions` type are exported.

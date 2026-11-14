@@ -216,18 +216,22 @@ export const RECEIPT_TAGS = {
 } as const;
 
 /**
- * Settlement Result
+ * Settlement Result (deprecated `settlement()`)
+ *
+ * `settlement()` sends nothing: telecollecte is not part of the NapsPay ECR
+ * protocol (spec v2.0 §4.7: TM=010 is Payment Totals). It always returns
+ * `success: false`, `responseCode: 'UNSUPPORTED'`, and no date, time or receipt.
  */
 export interface SettlementResult {
-  /** Whether settlement was successful */
+  /** Always false: telecollecte is not part of the ECR protocol */
   success: boolean;
-  /** Response code (000 = success) */
+  /** Always 'UNSUPPORTED' */
   responseCode: string;
-  /** Settlement date (DDMMYYYY) */
+  /** Always undefined */
   date?: string;
-  /** Settlement time (HHMMSS) */
+  /** Always undefined */
   time?: string;
-  /** Settlement receipt */
+  /** Always undefined; use totals() for the daily totals ticket */
   receipt?: Receipt;
   /** Error message if failed */
   error?: string;
@@ -341,9 +345,11 @@ export const MESSAGE_TYPES = {
   DUPLICATE_RESPONSE: '108',
   NETWORK_TEST_REQUEST: '009',
   NETWORK_TEST_RESPONSE: '109',
+  /** @deprecated TM=010 is Payment Totals (spec v2.0 §4.7), not settlement. Use TOTALS_REQUEST */
   SETTLEMENT_REQUEST: '010',
+  /** @deprecated TM=110 is the Payment Totals reply. Use TOTALS_RESPONSE */
   SETTLEMENT_RESPONSE: '110',
-  TOTALS_REQUEST: '010', // Totals report — shares TM with settlement
+  TOTALS_REQUEST: '010', // Payment Totals (spec v2.0 §4.7)
   TOTALS_RESPONSE: '110',
   RESET_REQUEST: '012',
   RESET_RESPONSE: '112',

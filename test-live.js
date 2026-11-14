@@ -64,7 +64,7 @@ function buildDuplicate(ncai, sequence, stan) {
   return msg;
 }
 
-function buildSettlement(ncai, sequence) {
+function buildTotals(ncai, sequence) {
   const { date, time } = now();
   return buildField('001', '010') + buildField('003', ncai) +
          buildField('004', sequence) +

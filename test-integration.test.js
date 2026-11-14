@@ -100,12 +100,14 @@ test('approve: payment, management ops and two-phase void', forModes('approve'),
   const net = await client.networkTest('01', '00001');
   assert.equal(net.responseCode, 'UNSUPPORTED', 'TM 009 is not sent over TCP');
 
+  const settle = await client.settlement('01', '00001');
+  assert.equal(settle.responseCode, 'UNSUPPORTED', 'telecollecte is not part of the ECR protocol');
+
   for (const op of [
     () => client.totals('01', '00001'),
     () => client.referencing('01', '00001'),
     () => client.printDuplicate('01', '00001'),
     () => client.resetPinPad('01', '00001'),
-    () => client.settlement('01', '00001'),
   ]) {
     const r = await op();
     assert.equal(r.responseCode, '000');

@@ -392,23 +392,38 @@ test('networkTest over TCP sends nothing and returns UNSUPPORTED', async () => {
   assert.equal(nativeCalls.length, 0, 'no frame sent');
 });
 
+test('settlement sends nothing and returns UNSUPPORTED (TM 010 is Payment Totals)', async () => {
+  reset();
+  const client = new NapsPayClient({ host: '127.0.0.1' });
+  const result = await client.settlement('01', '00001');
+  assert.equal(result.success, false);
+  assert.equal(result.responseCode, 'UNSUPPORTED');
+  assert.equal(
+    result.error,
+    'Telecollecte is not part of the NapsPay ECR protocol: run it from the terminal menu. Use totals() for the daily totals ticket.'
+  );
+  assert.equal(result.date, undefined);
+  assert.equal(result.time, undefined);
+  assert.equal(result.receipt, undefined);
+  assert.equal(nativeCalls.length, 0, 'no connection opened, no frame sent');
+});
+
 test('no request frame ends with "!" or "?" (TCP requests carry no terminator)', async () => {
   reset();
   nativeResponses = [
     buildField('001', '101') + buildField('013', '000') + buildField('008', '000042'),
     buildField('001', '102') + buildField('013', '000'),
     voidResponse(), voidConfirmation(),
-    ...Array(5).fill(buildField('013', '000')),
+    ...Array(4).fill(buildField('013', '000')),
   ];
   const client = new NapsPayClient({ host: '127.0.0.1' });
   await client.processPayment({ amount: 1.5, registerId: '01', cashierId: '00001' });
   await client.cancelPayment('000042', '01', '00001', '000001', 150);
-  await client.settlement('01', '00001');
   await client.totals('01', '00001');
   await client.referencing('01', '00001');
   await client.printDuplicate('01', '00001');
   await client.resetPinPad('01', '00001');
-  assert.equal(nativeCalls.length, 9);
+  assert.equal(nativeCalls.length, 8);
   for (const call of nativeCalls) {
     assert.doesNotMatch(call.tlv, /[!?]$/, call.tlv);
   }
@@ -416,14 +431,13 @@ test('no request frame ends with "!" or "?" (TCP requests carry no terminator)',
 
 test('management operations use the main timeout, never a shorter fixed one', async () => {
   reset();
-  nativeResponses = Array(5).fill(buildField('013', '000'));
+  nativeResponses = Array(4).fill(buildField('013', '000'));
   const client = new NapsPayClient({ host: '127.0.0.1', timeout: 90000 });
-  await client.settlement('01', '00001');
   await client.totals('01', '00001');
   await client.referencing('01', '00001');
   await client.printDuplicate('01', '00001');
   await client.resetPinPad('01', '00001');
-  assert.deepEqual(nativeCalls.map((c) => c.timeout), [90000, 90000, 90000, 90000, 90000]);
+  assert.deepEqual(nativeCalls.map((c) => c.timeout), [90000, 90000, 90000, 90000]);
 });
 
 test('response-code table covers the full NapsPay ISO list', () => {
